@@ -1,0 +1,40 @@
+# Local Python environments
+venv/
+.venv/
+env/
+
+# Secrets: share the template only
+.env
+.env.*
+!.env.example
+
+# Runtime files and user uploads
+instance/
+uploads/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Python/test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Local editors and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Database backups may contain account data; allow only the reviewed schema
+*.sql
+*.sql.gz
+*.sql.zip
+*.dump
+!schema.sql
