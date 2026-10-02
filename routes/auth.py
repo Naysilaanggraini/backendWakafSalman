@@ -8,7 +8,7 @@ from functools import wraps
 import jwt
 
 from extensions import db
-from models import User
+from models import User, UserProfile
 from sqlalchemy.exc import IntegrityError
 from routes.user_validation import validate_user_data
 from routes.profile_photos import MAX_PHOTO_BYTES, photo_directory, save_profile_photo
@@ -225,7 +225,7 @@ def update_me(user):
     request.max_content_length = MAX_PHOTO_BYTES + 64 * 1024
     multipart = request.mimetype == "multipart/form-data"
     data = request.form.to_dict() if multipart else request.get_json(silent=True)
-    values, error = validate_user_data(data)
+    values, error = validate_user_data(data, allow_phone=True)
     if error:
         return {"message": error}, 400
     photo_path = None
@@ -239,6 +239,12 @@ def update_me(user):
         except OSError:
             return {"message": "Foto belum dapat disimpan. Coba lagi."}, 503
         values["foto_profil"] = "/api/auth/profile-photos/" + photo_path.name
+    if "no_hp" in values:
+        phone = values.pop("no_hp") or None
+        if user.user_profile is not None:
+            user.user_profile.no_hp = phone
+        elif phone is not None:
+            user.user_profile = UserProfile(no_hp=phone)
     for key, value in values.items():
         setattr(user, key, value)
     try:

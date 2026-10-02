@@ -16,7 +16,8 @@ backend/                   # Setelah clone, ini adalah root repository
 ├── extensions.py
 ├── models/
 │   ├── __init__.py
-│   └── user.py
+│   ├── user.py
+│   └── user_profile.py
 ├── routes/
 │   ├── __init__.py
 │   ├── auth.py
@@ -32,9 +33,9 @@ backend/                   # Setelah clone, ini adalah root repository
 ## Status implementasi
 
 - Tersedia: register/login JWT, role `admin`/`user`, status `aktif`/`nonaktif`, baca/edit profil, upload foto, serta list/tambah/edit/status akun oleh admin.
-- `schema.sql` memuat 13 tabel existing, tetapi model SQLAlchemy yang tersedia baru `User`. Keberadaan tabel bukan berarti API fiturnya sudah dibuat.
+- `schema.sql` memuat 13 tabel existing; model SQLAlchemy yang tersedia adalah `User` dan `UserProfile`. Keberadaan tabel bukan berarti API fiturnya sudah dibuat.
 - Course, materi, enrollment/progress, test, discussion, activity, dan laporan belum memiliki implementasi backend.
-- `user_profile.no_hp` sudah ada di schema, tetapi model/API No. HP belum diimplementasikan.
+- No. HP dibaca melalui `GET /api/auth/me` sebagai `user_profile.no_hp`. Kirim field teks `no_hp` (maksimal 30 karakter) melalui `PATCH /api/auth/me`, baik JSON maupun multipart. String kosong menghapus nomor; field yang tidak dikirim mempertahankan nomor. Baris profil dibuat saat nomor pertama disimpan, untuk User maupun Admin.
 - `users.divisi` tetap ada sebagai kolom legacy, walaupun frontend tidak menggunakannya.
 - Flask-Migrate sudah diinisialisasi, tetapi belum ada baseline/revisi migration. Jangan menjalankan `db.create_all()`, autogenerate migration, atau upgrade untuk setup clone ini.
 

@@ -5,8 +5,10 @@ from urllib.parse import urlsplit
 PROFILE_FIELDS = {"nama", "email", "divisi", "jabatan", "foto_profil"}
 
 
-def validate_user_data(data, *, create=False, admin=False):
+def validate_user_data(data, *, create=False, admin=False, allow_phone=False):
     allowed = PROFILE_FIELDS | ({"role", "status"} if admin else set())
+    if allow_phone:
+        allowed |= {"no_hp"}
     if create:
         allowed |= {"password"}
     if not isinstance(data, dict) or not data:
@@ -15,7 +17,7 @@ def validate_user_data(data, *, create=False, admin=False):
         return None, "Ada field yang tidak dapat diubah"
 
     values = {}
-    limits = {"nama": 150, "email": 150, "divisi": 100, "jabatan": 100, "foto_profil": 500}
+    limits = {"nama": 150, "email": 150, "divisi": 100, "jabatan": 100, "foto_profil": 500, "no_hp": 30}
     for key, value in data.items():
         if key in {"divisi", "jabatan", "foto_profil"} and value is None:
             value = ""
@@ -30,6 +32,8 @@ def validate_user_data(data, *, create=False, admin=False):
             return None, f"{key} wajib diisi"
     if "email" in values and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", values["email"]):
         return None, "Masukkan alamat email yang valid"
+    if values.get("no_hp") and (not re.fullmatch(r"\+?[0-9 ()-]+", values["no_hp"]) or not re.search(r"[0-9]", values["no_hp"])):
+        return None, "No. HP hanya boleh berisi angka, awalan +, spasi, tanda kurung, atau tanda hubung"
     if "role" in values and values["role"] not in {"admin", "user"}:
         return None, "Role tidak valid"
     if "status" in values and values["status"] not in {"aktif", "nonaktif"}:

@@ -5,12 +5,15 @@ from flask import has_request_context, request
 class User(db.Model):
     __tablename__ = "users"
 
+    user_profile = db.relationship("UserProfile", back_populates="user", uselist=False, lazy="selectin")
+
     def to_dict(self):
         """Public account fields; never expose the password hash."""
         return {
             "id_user": self.id_user,
             "nama": self.nama,
             "email": self.email,
+            "user_profile": {"no_hp": self.user_profile.no_hp if self.user_profile else None},
             "divisi": self.divisi,
             "jabatan": self.jabatan,
             "role": self.role,

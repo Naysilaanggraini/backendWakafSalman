@@ -92,6 +92,43 @@ class UsersApiTests(unittest.TestCase):
         self.assertEqual(self.client.patch("/api/users/2", headers=self.headers(), json={"status": "aktif"}).status_code, 200)
         self.assertEqual(self.client.get("/api/auth/me", headers=self.headers(2)).status_code, 200)
 
+    def test_phone_create_update_clear_for_both_roles(self):
+        for account in (self.user, self.admin):
+            with self.subTest(role=account.role):
+                headers = self.headers(account.id_user)
+                self.assertEqual(self.client.get("/api/auth/me", headers=headers).json["user_profile"], {"no_hp": None})
+                response = self.client.patch("/api/auth/me", headers=headers, json={"no_hp": "081234567890"})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json["user"]["user_profile"]["no_hp"], "081234567890")
+                original = account.user_profile
+                self.assertIs(original.user, account)
+                response = self.client.patch("/api/auth/me", headers=headers, json={"no_hp": "+62 812-3456-7890"})
+                self.assertEqual(response.status_code, 200)
+                self.assertIs(account.user_profile, original)
+                self.client.patch("/api/auth/me", headers=headers, json={"jabatan": "Staff"})
+                self.assertEqual(self.client.get("/api/auth/me", headers=headers).json["user_profile"]["no_hp"], "+62 812-3456-7890")
+                response = self.client.patch("/api/auth/me", headers=headers, json={"no_hp": ""})
+                self.assertEqual(response.status_code, 200)
+                self.assertIsNone(account.user_profile.no_hp)
+
+    def test_phone_validation_and_account_isolation(self):
+        for value in (12345, None, "1" * 31, "abc", "+()", "12+34"):
+            response = self.client.patch("/api/auth/me", headers=self.headers(2), json={"no_hp": value})
+            self.assertEqual(response.status_code, 400)
+        self.session.commit.assert_not_called()
+        self.assertEqual(self.client.patch("/api/auth/me", json={"no_hp": "081234567890"}).status_code, 401)
+        self.assertEqual(self.client.patch("/api/auth/me", headers=self.headers(2), json={"no_hp": "081234567890", "id_user": 1}).status_code, 400)
+        response = self.client.patch("/api/auth/me", headers=self.headers(2), data={"no_hp": "+6281234567890", "foto": self.photo()})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["user"]["user_profile"]["no_hp"], "+6281234567890")
+        self.assertIsNone(self.admin.user_profile)
+
+    def test_failed_phone_save_rolls_back(self):
+        self.session.commit.side_effect = IntegrityError("update", {}, Exception("duplicate"))
+        response = self.client.patch("/api/auth/me", headers=self.headers(2), json={"no_hp": "081234567890", "email": "admin@example.com"})
+        self.assertEqual(response.status_code, 409)
+        self.session.rollback.assert_called_once()
+
     def test_admin_cannot_demote_or_deactivate_self(self):
         for values in [{"role": "user"}, {"status": "nonaktif"}]:
             self.assertEqual(self.client.patch("/api/users/1", headers=self.headers(), json=values).status_code, 400)
