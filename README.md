@@ -33,8 +33,9 @@ backend/                   # Setelah clone, ini adalah root repository
 ## Status implementasi
 
 - Tersedia: register/login JWT, role `admin`/`user`, status `aktif`/`nonaktif`, baca/edit profil, upload foto, serta list/tambah/edit/status akun oleh admin.
-- `schema.sql` memuat 13 tabel existing; model SQLAlchemy yang tersedia adalah `User` dan `UserProfile`. Keberadaan tabel bukan berarti API fiturnya sudah dibuat.
-- Course, materi, enrollment/progress, test, discussion, activity, dan laporan belum memiliki implementasi backend.
+- `schema.sql` memuat 13 tabel existing; model SQLAlchemy yang tersedia adalah `User`, `UserProfile`, dan `Activity`. Keberadaan tabel bukan berarti API fiturnya sudah dibuat.
+- Course, materi, enrollment/progress, test, dan discussion tetap menjadi domain Developer 2/3. Activity login dan dashboard statistik Identity tersedia; leaderboard masih menunggu kontrak data/ranking.
+- Audit, kontrak API, batas schema activity, dan panduan integrasi: [IDENTITY_INTEGRATION.md](IDENTITY_INTEGRATION.md).
 - No. HP dibaca melalui `GET /api/auth/me` sebagai `user_profile.no_hp`. Kirim field teks `no_hp` (maksimal 30 karakter) melalui `PATCH /api/auth/me`, baik JSON maupun multipart. String kosong menghapus nomor; field yang tidak dikirim mempertahankan nomor. Baris profil dibuat saat nomor pertama disimpan, untuk User maupun Admin.
 - `users.divisi` tetap ada sebagai kolom legacy, walaupun frontend tidak menggunakannya.
 - Flask-Migrate sudah diinisialisasi, tetapi belum ada baseline/revisi migration. Jangan menjalankan `db.create_all()`, autogenerate migration, atau upgrade untuk setup clone ini.
@@ -147,8 +148,17 @@ Login setelah perubahan role. Jangan mengisi kolom password menggunakan password
 | GET | `/api/users` | Admin aktif |
 | POST | `/api/users` | Admin aktif |
 | PATCH | `/api/users/<user_id>` | Admin aktif |
+| GET | `/api/activity` | Admin aktif; pagination dan filter |
+| GET | `/api/dashboard` | Admin aktif; statistik Identity |
+| GET | `/api/leaderboard` | Akun aktif; sementara 501 pending_dependencies |
 
 Login mengembalikan `{token, user, message}`. `GET /api/auth/me` mengembalikan object user langsung. Request terautentikasi memakai `Authorization: Bearer <token>`.
+
+Login sukses mencatat activity `login` dalam transaksi yang sama dengan terakhir_login.
+Kegagalan transaksi mengembalikan 503 tanpa token. Event edit/register/admin belum
+didukung enum activity existing, sehingga tidak dicatat sebagai event lain.
+Admin POST/PATCH `/api/users` juga menerima field opsional `no_hp` dengan aturan
+yang sama seperti profil sendiri; respons tetap memakai `user_profile.no_hp`.
 
 Edit profil mendukung JSON atau multipart dengan nama field upload `foto`. Foto maksimal 2 MB, JPG/PNG/WebP. File disimpan backend dan alamatnya disimpan pada `users.foto_profil`.
 
@@ -160,7 +170,7 @@ Edit profil mendukung JSON atau multipart dengan nama field upload `foto`. Foto 
 .\venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Tes existing menggunakan session database simulasi dan foto sementara. Tes ini tidak membuktikan integrasi transaksi/FK pada database MySQL/MariaDB nyata. Setup clone dan import schema perlu diuji pada database development kosong tersendiri.
+Tes existing menggunakan session database simulasi dan foto sementara. Tes Identity/reporting tambahan menggunakan SQLite in-memory dengan transaksi ORM nyata. Tes ini tidak membuktikan locking/enum/FK pada database MySQL/MariaDB nyata. Setup clone dan import schema perlu diuji pada database development kosong tersendiri.
 
 ## Mengunggah repository pertama kali — pemilik proyek
 
