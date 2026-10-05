@@ -6,6 +6,8 @@ from extensions import db, migrate
 from models import User
 from routes.auth import auth_bp
 from routes.users import users_bp
+from routes.tests import tests_bp
+from routes.discussions import discussions_bp
 
 
 def create_app():
@@ -23,6 +25,8 @@ def create_app():
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
+    app.register_blueprint(tests_bp)
+    app.register_blueprint(discussions_bp)
 
     @app.route("/")
     def home():
