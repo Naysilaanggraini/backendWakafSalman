@@ -1,0 +1,45 @@
+name: lentera
+
+x-app: &app
+  image: ${APP_IMAGE:-lentera-backend:local}
+  build: .
+  environment:
+    APP_ENV: ${APP_ENV:?Set APP_ENV (production for deployment)}
+    DB_HOST: ${DB_HOST:?Set external DB_HOST}
+    DB_PORT: ${DB_PORT:-3306}
+    DB_NAME: ${DB_NAME:?Set DB_NAME}
+    DB_USER: ${DB_USER:?Set DB_USER}
+    DB_PASSWORD: ${DB_PASSWORD?Set DB_PASSWORD (empty allowed in development)}
+    JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY}
+    CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS}
+    FLASK_DEBUG: ${FLASK_DEBUG:-false}
+    ENABLE_DEV_ROUTES: ${ENABLE_DEV_ROUTES:-false}
+    PROXY_HOPS: ${PROXY_HOPS:-0}
+    WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+    PROFILE_PHOTO_DIR: /app/instance/profile_photos
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  volumes:
+    - profile_photos:/app/instance/profile_photos
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  api:
+    <<: *app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    stop_grace_period: 40s
+
+volumes:
+  profile_photos:

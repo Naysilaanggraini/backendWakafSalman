@@ -1,0 +1,27 @@
+[Unit]
+Description=Lentera backend API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lentera
+Group=lentera
+WorkingDirectory=/opt/lentera
+EnvironmentFile=/etc/lentera.env
+Environment=APP_ENV=production
+Environment=PROFILE_PHOTO_DIR=/var/lib/lentera/profile_photos
+ExecStart=/opt/lentera/.venv/bin/gunicorn --config gunicorn.conf.py --bind 127.0.0.1:8000 app:create_app()
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=40
+StateDirectory=lentera
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/lentera
+
+[Install]
+WantedBy=multi-user.target

@@ -2,6 +2,25 @@
 
 Backend Flask untuk authentication, profil/foto profil, pengelolaan akun, serta Test & Discussion LMS Wakaf Salman. Folder ini disiapkan sebagai root repository backend terpisah. Frontend React/Vite tetap berada pada repository frontend.
 
+## Production, Docker, dan migrasi
+
+Panduan lengkap: [docs/PRODUCTION.md](docs/PRODUCTION.md).
+Tersedia Dockerfile non-root, Compose khusus API Gunicorn dengan volume foto persisten dan database eksternal,
+Makefile, migrasi Alembic, template Nginx HTTPS, backup/restore, dan service systemd.
+
+Untuk **database baru** setelah mengisi secret dan domain di `.env`:
+
+```sh
+cp .env.example .env
+# Isi APP_ENV=production, koneksi DB eksternal, secret, dan origin HTTPS terlebih dahulu:
+make build
+make migrate
+make up
+```
+
+Untuk database existing, ikuti prosedur adopsi/stamp di panduan sebelum migrasi.
+Jangan mengimpor ulang schema atau menjalankan SQL assessment yang sudah diterapkan.
+
 ## Isi repository
 
 ```text
@@ -38,7 +57,7 @@ backend/                   # Setelah clone, ini adalah root repository
 - Audit dan kontrak Identity: [IDENTITY_INTEGRATION.md](IDENTITY_INTEGRATION.md).
 - No. HP dibaca melalui `GET /api/auth/me` sebagai `user_profile.no_hp`. Kirim field teks `no_hp` (maksimal 30 karakter) melalui `PATCH /api/auth/me`, baik JSON maupun multipart. String kosong menghapus nomor; field yang tidak dikirim mempertahankan nomor. Baris profil dibuat saat nomor pertama disimpan, untuk User maupun Admin.
 - `users.divisi` tetap ada sebagai kolom legacy, walaupun frontend tidak menggunakannya.
-- Flask-Migrate sudah diinisialisasi, tetapi belum ada baseline/revisi migration. Jangan menjalankan `db.create_all()`, autogenerate migration, atau upgrade untuk setup clone ini.
+- Flask-Migrate memiliki baseline `0001_baseline` dan revisi `0002_assessment`. Database kosong memakai `flask --app app db upgrade`; database existing memerlukan prosedur adopsi di panduan production. Jangan menjalankan `db.create_all()` atau autogenerate terhadap database aplikasi.
 
 ## Lingkungan asal
 
@@ -74,11 +93,9 @@ CREATE DATABASE lmswakafsalman_dev
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-Pilih database **lmswakafsalman_dev** di SQL client, lalu jalankan isi `schema.sql` satu kali. Bila memakai CLI SQL client, pilih database tersebut lalu gunakan `SOURCE` dengan path absolut file schema.
-
-Schema berisi `CREATE TABLE` saja, tanpa akun contoh, `INSERT`, `DROP`, `TRUNCATE`, atau kredensial. Urutannya sudah mengikuti dependency FK. Jika tabel sudah ada, hentikan proses dan periksa database yang dipilih; jangan menghapus tabel untuk memaksa import berhasil.
-
-File ini adalah snapshot struktur existing, bukan migration dan bukan script pembaruan database lama.
+Database harus kosong. Setelah mengisi `.env` pada langkah berikutnya, jalankan
+migrasi melalui Flask. `schema.sql` disimpan sebagai referensi struktur legacy;
+tidak perlu diimpor untuk setup baru.
 
 ### 3. Isi .env lokal
 
@@ -92,7 +109,14 @@ Buat JWT key lokal:
 
 Salin hasilnya ke `JWT_SECRET_KEY` dalam `.env`. Jangan memakai key atau password dari komputer pengembang lain.
 
-Konfigurasi existing membentuk URL database langsung dari variabel environment. Jika username/password mengandung karakter khusus URL seperti `@`, `/`, `:` atau `%`, gunakan nilai yang di-URL-encode untuk komponen tersebut; jangan mengubah password database hanya untuk menyalin contoh.
+Masukkan username/password dengan karakter aslinya, termasuk `@`, `/`, `:`, dan
+`%`; SQLAlchemy melakukan encoding URL secara otomatis.
+
+Terapkan migrasi ke database development kosong yang baru dibuat:
+
+```powershell
+.\venv\Scripts\python.exe -m flask --app app db upgrade
+```
 
 ### 4. Jalankan backend
 
@@ -107,9 +131,9 @@ Biarkan terminal tetap berjalan. Membuka frontend saja tidak mengaktifkan backen
 Pemeriksaan lokal:
 
 - `http://localhost:5000/` → pesan backend berjalan.
-- `http://localhost:5000/db-test` → koneksi database berhasil.
+- `http://localhost:5000/health/ready` → database terhubung dan migrasi terbaru.
 
-Jalankan frontend dari repository frontend dengan `npm run dev`. Gunakan `http://localhost:5173`, sesuai origin CORS existing. Jika Vite pindah ke port lain, kosongkan port 5173 atau koordinasikan perubahan konfigurasi; jangan menganggap backend menerima semua origin.
+Jalankan frontend dari repository frontend dengan `npm run dev`. Gunakan `http://localhost:5173`, sesuai `CORS_ORIGINS` di `.env`. Jika port frontend berubah, sesuaikan origin tersebut.
 
 ### 5. Buat akun uji sendiri
 
@@ -162,7 +186,7 @@ yang sama seperti profil sendiri; respons tetap memakai `user_profile.no_hp`.
 
 Edit profil mendukung JSON atau multipart dengan nama field upload `foto`. Foto maksimal 2 MB, JPG/PNG/WebP. File disimpan backend dan alamatnya disimpan pada `users.foto_profil`.
 
-`/`, `/db-test`, dan `/user-test` adalah endpoint development. `/user-test` menampilkan satu identitas akun tanpa autentikasi; jangan mengekspos deployment development ini ke publik.
+`/health/live` dan `/health/ready` tersedia untuk monitoring. `/db-test` dan `/user-test` hanya tersedia jika `ENABLE_DEV_ROUTES=true` pada development; keduanya selalu dinonaktifkan di production.
 
 ## Menjalankan tes
 
@@ -334,15 +358,11 @@ Frontend baru: `src/api/learningApi.js` memakai axiosInstance/token existing; `s
 
 ### Migration dan menjalankan
 
-Pakai database existing yang schema-nya cocok dengan `schema.sql`. Isi `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`, `DB_NAME`, `JWT_SECRET_KEY` sesuai `config.py`/`.env.example`. Jangan mengimpor ulang `schema.sql` ke database yang sudah berisi tabel.
-
-Di SQL client yang sudah memilih database tujuan, jalankan satu kali:
-
-```sql
-SOURCE C:/Users/USER/Documents/WakafSalman-main/backend/migrations_sql/001_test_discussion.sql;
-```
-
-Bisa membuka client dengan `mysql --host=127.0.0.1 --port=3306 --user=YOUR_DB_USER --password YOUR_DB_NAME` (ganti user/database; password diminta interaktif). DDL MySQL/MariaDB implicit commit; jangan jalankan ulang migration yang kolomnya sudah ada. Migration hanya mengubah penilaian/discussion. Tidak menggunakan Flask-Migrate autogenerate karena belum ada baseline migration; **jangan jalankan db.create_all() pada database aplikasi**. SQLite create_all hanya digunakan test terisolasi.
+Gunakan migrasi Alembic sesuai [panduan migrasi](docs/PRODUCTION.md#2-migrasi-pilih-sesuai-kondisi-database).
+SQL `migrations_sql/001_test_discussion.sql` tetap disimpan sebagai referensi
+legacy; perubahan yang sama kini diterapkan oleh revisi `0002_assessment`.
+Jangan menjalankan keduanya. Untuk database yang sudah menerima SQL manual,
+verifikasi schema lalu adopsi revisi sesuai panduan.
 
 ```powershell
 cd backend

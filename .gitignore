@@ -39,3 +39,4 @@ Thumbs.db
 *.dump
 !schema.sql
 !migrations_sql/001_test_discussion.sql
+backups/

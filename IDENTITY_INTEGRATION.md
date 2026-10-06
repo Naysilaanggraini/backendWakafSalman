@@ -1,3 +1,7 @@
+> Catatan setelah integrasi production: dokumen ini merekam audit branch Identity.
+> Konfigurasi/deployment kini mengikuti [docs/PRODUCTION.md](docs/PRODUCTION.md),
+> dengan baseline Alembic, revisi assessment, dan konfigurasi environment production.
+
 # Developer 1: audit, contracts, and integration
 
 Audit: 5 October 2026. Initial branch `identity-integration`, clean working tree.
