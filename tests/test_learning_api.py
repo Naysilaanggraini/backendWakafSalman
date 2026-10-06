@@ -11,6 +11,9 @@ from models.learning import utcnow
 from routes.auth import auth_bp
 from routes.tests import tests_bp
 from routes.discussions import discussions_bp
+from routes.enrollment import enrollment_bp
+from routes.progress import progress_bp
+from routes.reporting import reporting_bp
 
 
 class LearningApiTests(unittest.TestCase):
@@ -19,7 +22,7 @@ class LearningApiTests(unittest.TestCase):
         self.app.config.update(TESTING=True, SQLALCHEMY_DATABASE_URI="sqlite://",
             JWT_SECRET_KEY="test-only-learning-key-at-least-32-bytes", SQLALCHEMY_TRACK_MODIFICATIONS=False)
         db.init_app(self.app)
-        for bp in (auth_bp, tests_bp, discussions_bp):
+        for bp in (auth_bp, tests_bp, discussions_bp, enrollment_bp, progress_bp, reporting_bp):
             self.app.register_blueprint(bp)
         self.ctx = self.app.app_context()
         self.ctx.push()
@@ -64,6 +67,34 @@ class LearningApiTests(unittest.TestCase):
 
     def submit(self, attempt_id, correct=8, uid=1):
         return self.client.post(f"/api/test-attempts/{attempt_id}/submit", headers=self.headers(uid), json={"answers": self.answers(correct)})
+
+    def test_identity_enrollment_progress_assessment_and_discussion_share_data(self):
+        login = self.client.post("/api/auth/login", json={
+            "email": "user3@example.test", "password": "fixture-password"})
+        self.assertEqual(login.status_code, 200, login.json)
+        headers = {"Authorization": "Bearer " + login.json["token"]}
+        enrolled = self.client.post("/api/course/1/enrollment", headers=headers, json={})
+        self.assertEqual(enrolled.status_code, 201, enrolled.json)
+        blocked = self.client.post("/api/courses/1/test-attempts", headers=headers, json={})
+        self.assertEqual(blocked.status_code, 403)
+        progress = self.client.patch("/api/me/materi/1/progress", headers=headers,
+                                     json={"status": "selesai"})
+        self.assertEqual(progress.status_code, 200, progress.json)
+        aid = self.start(uid=3)
+        result = self.submit(aid, uid=3)
+        self.assertEqual(result.status_code, 200, result.json)
+        self.assertTrue(result.json["passed"])
+        enrollment = db.session.query(Enrollment).filter_by(id_user=3).one()
+        self.assertEqual(enrollment.status_test, "lulus")
+        self.assertEqual(enrollment.status, "selesai")
+        comment = self.client.post("/api/discussions/material/1", headers=headers,
+                                   json={"content": "Completed through the shared APIs"})
+        self.assertEqual(comment.status_code, 201, comment.json)
+        from models import Activity, Materi, UserCourse, UserMateri
+        self.assertIs(Material, Materi)
+        self.assertIs(Enrollment, UserCourse)
+        self.assertIs(MaterialProgress, UserMateri)
+        self.assertEqual(db.session.query(Activity).filter_by(id_user=3, jenis_aktivitas="login").count(), 1)
 
     def test_questions_and_detail_never_expose_keys(self):
         response = self.client.get("/api/courses/1/test", headers=self.headers())

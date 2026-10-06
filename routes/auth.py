@@ -8,8 +8,10 @@ from functools import wraps
 import jwt
 
 from extensions import db
-from models import User, UserProfile
-from sqlalchemy.exc import IntegrityError
+from models import User
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from services.activity import record_activity
+from services.profile import apply_phone
 from routes.user_validation import validate_user_data
 from routes.profile_photos import MAX_PHOTO_BYTES, photo_directory, save_profile_photo
 
@@ -44,8 +46,12 @@ def token_required(f):
             payload = jwt.decode(
                 token,
                 current_app.config["JWT_SECRET_KEY"],
-                algorithms=["HS256"]
+                algorithms=["HS256"],
+                options={"require": ["exp", "id_user"]}
             )
+
+            if type(payload["id_user"]) is not int or payload["id_user"] <= 0:
+                return {"message": "Token tidak valid"}, 401
 
             user = db.session.get(
                 User,
@@ -98,21 +104,19 @@ def admin_required(f):
 
 @auth_bp.route("/register", methods=["POST"])
 def register():
-    data = request.get_json()
+    data = request.get_json(silent=True)
 
-    if not data:
+    if not isinstance(data, dict) or not data:
         return {
             "message": "Data registrasi tidak ditemukan"
         }, 400
 
-    nama = data.get("nama")
-    email = data.get("email")
-    password = data.get("password")
-
-    if not nama or not email or not password:
-        return {
-            "message": "Nama, email, dan password wajib diisi"
-        }, 400
+    # Preserve public registration's existing behavior: extra role/status ignored.
+    values, error = validate_user_data(
+        {key: data.get(key) for key in ("nama", "email", "password")}, create=True)
+    if error:
+        return {"message": error}, 400
+    nama, email, password = (values[key] for key in ("nama", "email", "password"))
 
     existing_user = db.session.execute(
         db.select(User).where(User.email == email)
@@ -132,7 +136,11 @@ def register():
     )
 
     db.session.add(new_user)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return {"message": "Email sudah terdaftar"}, 409
 
     return {
         "message": "Registrasi berhasil"
@@ -145,9 +153,9 @@ def register():
 
 @auth_bp.route("/login", methods=["POST"])
 def login():
-    data = request.get_json()
+    data = request.get_json(silent=True)
 
-    if not data:
+    if not isinstance(data, dict) or not data:
         return {
             "message": "Data login tidak ditemukan"
         }, 400
@@ -155,13 +163,13 @@ def login():
     email = data.get("email")
     password = data.get("password")
 
-    if not email or not password:
+    if not isinstance(email, str) or not isinstance(password, str) or not email.strip() or not password:
         return {
             "message": "Email dan password wajib diisi"
         }, 400
 
     user = db.session.execute(
-        db.select(User).where(User.email == email)
+        db.select(User).where(User.email == email.strip())
     ).scalar_one_or_none()
 
     if not user:
@@ -193,7 +201,12 @@ def login():
         algorithm="HS256"
     )
 
-    db.session.commit()
+    record_activity(user.id_user, "login", waktu_dimulai=user.terakhir_login)
+    try:
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        return {"message": "Login belum dapat disimpan. Coba lagi."}, 503
 
     return {
         "message": "Login berhasil",
@@ -225,6 +238,8 @@ def update_me(user):
     request.max_content_length = MAX_PHOTO_BYTES + 64 * 1024
     multipart = request.mimetype == "multipart/form-data"
     data = request.form.to_dict() if multipart else request.get_json(silent=True)
+    if multipart and not data and request.files:
+        data = {"foto_profil": ""}
     values, error = validate_user_data(data, allow_phone=True)
     if error:
         return {"message": error}, 400
@@ -239,12 +254,7 @@ def update_me(user):
         except OSError:
             return {"message": "Foto belum dapat disimpan. Coba lagi."}, 503
         values["foto_profil"] = "/api/auth/profile-photos/" + photo_path.name
-    if "no_hp" in values:
-        phone = values.pop("no_hp") or None
-        if user.user_profile is not None:
-            user.user_profile.no_hp = phone
-        elif phone is not None:
-            user.user_profile = UserProfile(no_hp=phone)
+    apply_phone(user, values)
     for key, value in values.items():
         setattr(user, key, value)
     try:

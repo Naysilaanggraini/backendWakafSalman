@@ -33,8 +33,9 @@ backend/                   # Setelah clone, ini adalah root repository
 ## Status implementasi
 
 - Tersedia: register/login JWT, role `admin`/`user`, status `aktif`/`nonaktif`, baca/edit profil, upload foto, serta list/tambah/edit/status akun oleh admin.
-- `schema.sql` memuat 13 tabel existing. Model `User`/`UserProfile` tetap digunakan; `models/learning.py` memetakan tabel learning existing untuk Test & Discussion. Mapping course/materi/progress bersifat parsial untuk kebutuhan akses, bukan schema pengganti.
-- Test & Discussion tersedia; lihat kontrak Developer 3 di bawah. API katalog course, pengelolaan materi, enrollment/progress materi, activity, dan laporan masih belum tersedia.
+- Tersedia: kategori/course/materi, enrollment/progress, Test & Discussion, activity login, dan dashboard statistik Identity. Leaderboard masih menunggu kontrak data/ranking.
+- Model course/materi/enrollment/progress dipakai bersama oleh Learning dan Assessment; `models/learning.py` menyediakan alias kompatibilitas serta model assessment/discussion.
+- Audit dan kontrak Identity: [IDENTITY_INTEGRATION.md](IDENTITY_INTEGRATION.md).
 - No. HP dibaca melalui `GET /api/auth/me` sebagai `user_profile.no_hp`. Kirim field teks `no_hp` (maksimal 30 karakter) melalui `PATCH /api/auth/me`, baik JSON maupun multipart. String kosong menghapus nomor; field yang tidak dikirim mempertahankan nomor. Baris profil dibuat saat nomor pertama disimpan, untuk User maupun Admin.
 - `users.divisi` tetap ada sebagai kolom legacy, walaupun frontend tidak menggunakannya.
 - Flask-Migrate sudah diinisialisasi, tetapi belum ada baseline/revisi migration. Jangan menjalankan `db.create_all()`, autogenerate migration, atau upgrade untuk setup clone ini.
@@ -147,8 +148,17 @@ Login setelah perubahan role. Jangan mengisi kolom password menggunakan password
 | GET | `/api/users` | Admin aktif |
 | POST | `/api/users` | Admin aktif |
 | PATCH | `/api/users/<user_id>` | Admin aktif |
+| GET | `/api/activity` | Admin aktif; pagination dan filter |
+| GET | `/api/dashboard` | Admin aktif; statistik Identity |
+| GET | `/api/leaderboard` | Akun aktif; sementara 501 pending_dependencies |
 
 Login mengembalikan `{token, user, message}`. `GET /api/auth/me` mengembalikan object user langsung. Request terautentikasi memakai `Authorization: Bearer <token>`.
+
+Login sukses mencatat activity `login` dalam transaksi yang sama dengan terakhir_login.
+Kegagalan transaksi mengembalikan 503 tanpa token. Event edit/register/admin belum
+didukung enum activity existing, sehingga tidak dicatat sebagai event lain.
+Admin POST/PATCH `/api/users` juga menerima field opsional `no_hp` dengan aturan
+yang sama seperti profil sendiri; respons tetap memakai `user_profile.no_hp`.
 
 Edit profil mendukung JSON atau multipart dengan nama field upload `foto`. Foto maksimal 2 MB, JPG/PNG/WebP. File disimpan backend dan alamatnya disimpan pada `users.foto_profil`.
 
@@ -160,7 +170,7 @@ Edit profil mendukung JSON atau multipart dengan nama field upload `foto`. Foto 
 .\venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Tes existing menggunakan session database simulasi dan foto sementara. Tes ini tidak membuktikan integrasi transaksi/FK pada database MySQL/MariaDB nyata. Setup clone dan import schema perlu diuji pada database development kosong tersendiri.
+Tes existing menggunakan session database simulasi dan foto sementara. Tes Identity/reporting tambahan menggunakan SQLite in-memory dengan transaksi ORM nyata. Tes ini tidak membuktikan locking/enum/FK pada database MySQL/MariaDB nyata. Setup clone dan import schema perlu diuji pada database development kosong tersendiri.
 
 ## Mengunggah repository pertama kali — pemilik proyek
 
@@ -212,7 +222,7 @@ Database existing tidak mempunyai tabel `test`: `soal.id_course` adalah final te
 
 File backend baru:
 
-- `models/learning.py`: mapping `Course`, `Material`, `Enrollment`, `MaterialProgress`, `Question`, `Option`, `TestAttempt`, `UserAnswer`, `Discussion` ke tabel existing.
+- `models/learning.py`: model assessment/discussion serta alias ke model lengkap `Course`, `Materi`, `UserCourse`, dan `UserMateri` dari Learning.
 - `routes/learning_access.py`: validasi payload/context, akses enrollment, dan error konsisten.
 - `routes/tests.py`: soal, attempt, jawaban, submit, score, result.
 - `routes/discussions.py`: satu sistem discussion untuk tiga context, reply, edit/delete milik author.
@@ -320,7 +330,7 @@ Frontend baru: `src/api/learningApi.js` memakai axiosInstance/token existing; `s
 
 `CourseDiscussion` sekarang reusable melalui `{contextType, contextId, title}`. CourseDetail memasangnya untuk course dan materi terpilih; FinalTest memasangnya pada detail/questions/result dan tidak lagi redirect hanya karena materi belum selesai. Existing markup/styles, reply, edit, delete dipertahankan. Komentar seed lokal tidak digunakan lagi. Admin, auth, catalog store dan API unrelated tidak diubah.
 
-**Dependency di luar Developer 3:** daftar course/materi dan enrollment/completion materi belum punya API existing. CourseDetail/MyCourse/catalog admin tetap menggunakan data lokal. Tombol Mark as complete masih menyimpan sessionStorage, belum menulis `user_materi`; course yang dibuka secara lokal belum otomatis menjadi `user_course`. Akibatnya ID demo/localStorage tidak selalu cocok dengan ID DB; backend akan menolak 403/404 secara benar dan test belum dapat dimulai hanya dengan completion lokal. Developer Course/Material/Enrollment perlu menghubungkan catalog dan progress ke DB. Tidak ditambahkan endpoint atau enrollment palsu untuk menutupi gap tersebut. Leaderboard existing juga masih data prototype dan tidak menjadi sumber score Test.
+**Catatan integrasi:** API daftar course/materi dan enrollment/completion materi kini tersedia dari branch Learning. Integrasi frontend masih perlu disesuaikan. CourseDetail/MyCourse/catalog admin tetap menggunakan data lokal. Tombol Mark as complete masih menyimpan sessionStorage, belum menulis `user_materi`; course yang dibuka secara lokal belum otomatis menjadi `user_course`. Akibatnya ID demo/localStorage tidak selalu cocok dengan ID DB; backend akan menolak 403/404 secara benar dan test belum dapat dimulai hanya dengan completion lokal. Developer Course/Material/Enrollment perlu menghubungkan catalog dan progress ke DB. Tidak ditambahkan endpoint atau enrollment palsu untuk menutupi gap tersebut. Leaderboard existing juga masih data prototype dan tidak menjadi sumber score Test.
 
 ### Migration dan menjalankan
 
@@ -332,7 +342,7 @@ Di SQL client yang sudah memilih database tujuan, jalankan satu kali:
 SOURCE C:/Users/USER/Documents/WakafSalman-main/backend/migrations_sql/001_test_discussion.sql;
 ```
 
-Bisa membuka client dengan `mysql --host=127.0.0.1 --port=3306 --user=YOUR_DB_USER --password YOUR_DB_NAME` (ganti user/database; password diminta interaktif). DDL MySQL/MariaDB implicit commit; jangan jalankan ulang migration yang kolomnya sudah ada. Migration hanya mengubah penilaian/discussion. Tidak menggunakan Flask-Migrate autogenerate karena belum ada baseline dan mapping tabel learning parsial; **jangan jalankan db.create_all() pada database aplikasi**. SQLite create_all hanya digunakan test terisolasi.
+Bisa membuka client dengan `mysql --host=127.0.0.1 --port=3306 --user=YOUR_DB_USER --password YOUR_DB_NAME` (ganti user/database; password diminta interaktif). DDL MySQL/MariaDB implicit commit; jangan jalankan ulang migration yang kolomnya sudah ada. Migration hanya mengubah penilaian/discussion. Tidak menggunakan Flask-Migrate autogenerate karena belum ada baseline migration; **jangan jalankan db.create_all() pada database aplikasi**. SQLite create_all hanya digunakan test terisolasi.
 
 ```powershell
 cd backend

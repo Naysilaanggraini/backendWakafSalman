@@ -6,6 +6,7 @@ from extensions import db
 from models import User
 from routes.auth import admin_required, token_required
 from routes.user_validation import validate_user_data
+from services.profile import apply_phone
 
 
 users_bp = Blueprint("users", __name__, url_prefix="/api/users")
@@ -30,13 +31,16 @@ def list_users(user):
 def create_user(user):
     if user.status != "aktif":
         return {"message": "Akun tidak aktif"}, 403
-    values, error = validate_user_data(request.get_json(silent=True), create=True, admin=True)
+    values, error = validate_user_data(request.get_json(silent=True), create=True, admin=True, allow_phone=True)
     if error:
         return {"message": error}, 400
     values["password"] = generate_password_hash(values["password"])
     values.setdefault("role", "user")
     values.setdefault("status", "aktif")
-    account = User(**values)
+    account = User()
+    apply_phone(account, values)
+    for key, value in values.items():
+        setattr(account, key, value)
     db.session.add(account)
     try:
         db.session.commit()
@@ -50,7 +54,7 @@ def create_user(user):
 @token_required
 @admin_required
 def update_user(user, user_id):
-    values, error = validate_user_data(request.get_json(silent=True), admin=True)
+    values, error = validate_user_data(request.get_json(silent=True), admin=True, allow_phone=True)
     if error:
         return {"message": error}, 400
 
@@ -76,6 +80,7 @@ def update_user(user, user_id):
         if not any(item.id_user != user_id and item.role == "admin" and item.status == "aktif" for item in accounts):
             db.session.rollback()
             return {"message": "Minimal satu admin harus tetap aktif"}, 400
+    apply_phone(account, values)
     for key, value in values.items():
         setattr(account, key, value)
     try:

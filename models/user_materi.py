@@ -9,7 +9,7 @@ class UserMateri(db.Model):
         db.Index("idx_user_materi_user", "id_user"), db.Index("idx_user_materi_materi", "id_materi"),
         db.Index("idx_user_materi_status", "status"),
     )
-    id_user_materi = db.Column(db.Integer().with_variant(BIGINT(unsigned=True), "mysql"), primary_key=True, autoincrement=True)
+    id_user_materi = db.Column(BIGINT(unsigned=True).with_variant(db.Integer(), "sqlite"), primary_key=True, autoincrement=True)
     id_user = db.Column(INTEGER(unsigned=True), db.ForeignKey("users.id_user", name="fk_user_materi_user", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
     id_materi = db.Column(INTEGER(unsigned=True), db.ForeignKey("materi.id_materi", name="fk_user_materi_materi", ondelete="CASCADE", onupdate="CASCADE"), nullable=False)
     status = db.Column(db.Enum("belum_mulai", "berlangsung", "selesai"), nullable=False, server_default="belum_mulai")
