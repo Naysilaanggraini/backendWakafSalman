@@ -159,6 +159,19 @@ WHERE email = 'developer@example.test';
 
 Login setelah perubahan role. Jangan mengisi kolom password menggunakan password plaintext. Setelah admin pertama tersedia, akun berikutnya dapat dibuat melalui Kelola User/API admin.
 
+## Dokumentasi API (OpenAPI)
+
+Kontrak API tersedia di [openapi.yaml](openapi.yaml) (OpenAPI 3.1): 35 path dan
+49 operasi, termasuk autentikasi JWT, request/response, upload foto, akses admin,
+enrollment/progress, ujian, diskusi, reporting, dan healthcheck.
+
+Import file ini ke Postman atau buka dengan Swagger Editor yang mendukung OpenAPI
+3.1. Pilih server lokal/Docker atau sesuaikan hostname production. Login melalui
+`POST /api/auth/login`, lalu gunakan token sebagai Bearer authentication.
+Endpoint bertag `Development` hanya aktif jika konfigurasi mengizinkannya;
+leaderboard didokumentasikan sebagai `501` sesuai implementasi saat ini.
+File spesifikasi tidak otomatis menyediakan endpoint `/docs` atau Swagger UI.
+
 ## API existing
 
 | Method | URL | Akses |

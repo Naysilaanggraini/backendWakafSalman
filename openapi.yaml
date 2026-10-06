@@ -1,0 +1,3299 @@
+# Kontrak API Lentera; sesuaikan saat route, validator, atau serializer berubah.
+openapi: 3.1.0
+info:
+  title: Lentera — LMS Wakaf Salman API
+  version: 1.0.0
+  description: |-
+    Kontrak berdasarkan implementasi Flask di repository. Gunakan Bearer JWT dari POST /api/auth/login; tidak ada refresh token/logout endpoint. Role dan status akun dibaca ulang dari database pada setiap request.
+
+    Path learning memakai /api/course (singular); assessment memakai /api/courses (plural). ID berasal dari database, bukan ID contoh/frontend. Daftar katalog/user/enrollment tidak memiliki pagination; hanya activity mendukung pagination.
+
+    Payload JSON memakai Content-Type: application/json. Field request yang tidak dikenal ditolak kecuali login/register yang mengabaikan field tambahan. Input teks umumnya di-trim. Global request limit 3 MiB; endpoint profil memakai batas 2 MiB + 64 KiB. Error aplikasi umumnya {message}; error framework/proxy (termasuk 413 di luar auth) dapat berupa HTML. Timestamp identitas/learning dapat tanpa timezone, sedangkan timestamp assessment/discussion memakai UTC dengan Z.
+
+    Endpoint Development bersifat opsional dan selalu tidak tersedia pada production. Spesifikasi ini tidak menambahkan route HTTP baru atau Swagger UI.
+servers:
+- url: http://localhost:5000
+  description: Flask development lokal
+- url: http://localhost:8000
+  description: Docker API lokal; sesuaikan API_PORT
+- url: https://{hostname}
+  description: Production HTTPS; ganti dengan hostname deployment
+  variables:
+    hostname:
+      default: api.example.com
+tags:
+- name: System
+- name: Auth
+- name: Users
+- name: Kategori
+- name: Course
+- name: Materi
+- name: Enrollment
+- name: Progress
+- name: Assessment
+- name: Discussion
+- name: Reporting
+- name: Development
+security:
+- bearerAuth: []
+paths:
+  /:
+    get:
+      tags:
+      - System
+      summary: Status backend
+      operationId: getBackendStatus
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Backend LMS Wakaf Salman berjalan
+      security: []
+  /health/live:
+    get:
+      tags:
+      - System
+      summary: Liveness proses API
+      operationId: get_health_live
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                status: ok
+      security: []
+  /health/ready:
+    get:
+      tags:
+      - System
+      summary: Kesiapan database dan migrasi
+      operationId: get_health_ready
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: Database tidak tersedia atau revisi belum terbaru.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+              example:
+                status: not_ready
+      security: []
+      description: 200 jika database terhubung dan revisi Alembic sama dengan head. Tidak mengembalikan detail koneksi.
+  /api/auth/register:
+    post:
+      tags:
+      - Auth
+      summary: Registrasi akun user
+      operationId: post_api_auth_register
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Registrasi berhasil
+        '400':
+          $ref: '#/components/responses/Error400'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '413':
+          $ref: '#/components/responses/Error413'
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+  /api/auth/login:
+    post:
+      tags:
+      - Auth
+      summary: Login dan dapatkan JWT
+      operationId: post_api_auth_login
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '413':
+          $ref: '#/components/responses/Error413'
+        '503':
+          $ref: '#/components/responses/Error503'
+      security: []
+      description: Token berlaku 8 jam. Login mencatat activity; kegagalan commit tidak menghasilkan token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+  /api/auth/me:
+    get:
+      tags:
+      - Auth
+      summary: Profil akun sendiri
+      operationId: get_api_auth_me
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+      description: Mengembalikan object user langsung, tanpa pembungkus user.
+    patch:
+      tags:
+      - Auth
+      summary: Ubah profil atau upload foto
+      operationId: patch_api_auth_me
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+                required:
+                - message
+                - user
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '413':
+          $ref: '#/components/responses/Error413'
+        '503':
+          $ref: '#/components/responses/Error503'
+      description: Hanya profil sendiri. JSON atau multipart/form-data; kirim satu file dengan nama foto. Request
+        multipart maksimal 2 MiB + 64 KiB. File maksimal 2 MiB. Upload foto tanpa field teks juga diperbolehkan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProfileUpload'
+  /api/auth/profile-photos/{filename}:
+    get:
+      tags:
+      - Auth
+      summary: Ambil foto profil PNG
+      operationId: get_api_auth_profile_photos_filename
+      responses:
+        '200':
+          description: Foto profil publik; cache maksimal 86400 detik.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Nama file tidak valid atau file tidak ditemukan.
+          content:
+            text/html:
+              schema:
+                type: string
+      security: []
+      parameters:
+      - name: filename
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: ^[a-f0-9]{32}\.png$
+  /api/auth/admin-test:
+    get:
+      tags:
+      - Auth
+      summary: Verifikasi akses admin
+      operationId: get_api_auth_admin_test
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  user:
+                    type: object
+                    properties:
+                      id_user:
+                        type: integer
+                        format: int64
+                        minimum: 1
+                      nama:
+                        type: string
+                      role:
+                        type: string
+                        enum:
+                        - admin
+                        - user
+                    required:
+                    - id_user
+                    - nama
+                    - role
+                required:
+                - message
+                - user
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+  /api/users:
+    get:
+      tags:
+      - Users
+      summary: Daftar akun
+      operationId: get_api_users
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+                required:
+                - users
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+      x-required-role: admin
+      description: Hanya admin aktif. Urut id_user menurun; tanpa pagination.
+    post:
+      tags:
+      - Users
+      summary: Buat akun
+      operationId: post_api_users
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+                required:
+                - message
+                - user
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+  /api/users/{user_id}:
+    patch:
+      tags:
+      - Users
+      summary: Ubah akun, role, atau status
+      operationId: patch_api_users_user_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+                required:
+                - message
+                - user
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+  /api/kategori:
+    get:
+      tags:
+      - Kategori
+      summary: Daftar kategori
+      operationId: get_api_kategori
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kategori:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Kategori'
+                required:
+                - kategori
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+      description: User hanya melihat data aktif. Admin melihat semua status. Tanpa pagination; urut ID menurun.
+    post:
+      tags:
+      - Kategori
+      summary: Tambah kategori
+      operationId: post_api_kategori
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  kategori:
+                    $ref: '#/components/schemas/Kategori'
+                required:
+                - message
+                - kategori
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KategoriCreate'
+  /api/kategori/{kategori_id}:
+    get:
+      tags:
+      - Kategori
+      summary: Detail kategori
+      operationId: get_api_kategori_kategori_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kategori:
+                    $ref: '#/components/schemas/Kategori'
+                required:
+                - kategori
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      description: User hanya melihat data aktif. Admin melihat semua status.
+      parameters:
+      - name: kategori_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    patch:
+      tags:
+      - Kategori
+      summary: Ubah kategori
+      operationId: patch_api_kategori_kategori_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  kategori:
+                    $ref: '#/components/schemas/Kategori'
+                required:
+                - message
+                - kategori
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+      parameters:
+      - name: kategori_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KategoriUpdate'
+    delete:
+      tags:
+      - Kategori
+      summary: Hapus kategori
+      operationId: delete_api_kategori_kategori_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: Hanya admin aktif. Ditolak jika masih memiliki relasi database yang menghalangi penghapusan.
+      parameters:
+      - name: kategori_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /api/course:
+    get:
+      tags:
+      - Course
+      summary: Daftar course
+      operationId: get_api_course
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  course:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Course'
+                required:
+                - course
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+      description: User hanya melihat data aktif dengan kategori aktif. Admin melihat semua status. Tanpa pagination;
+        urut ID menurun.
+    post:
+      tags:
+      - Course
+      summary: Tambah course
+      operationId: post_api_course
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  course:
+                    $ref: '#/components/schemas/Course'
+                required:
+                - message
+                - course
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseCreate'
+  /api/course/{course_id}:
+    get:
+      tags:
+      - Course
+      summary: Detail course
+      operationId: get_api_course_course_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  course:
+                    $ref: '#/components/schemas/Course'
+                required:
+                - course
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      description: User hanya melihat data aktif dengan kategori aktif. Admin melihat semua status.
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    patch:
+      tags:
+      - Course
+      summary: Ubah course
+      operationId: patch_api_course_course_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  course:
+                    $ref: '#/components/schemas/Course'
+                required:
+                - message
+                - course
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CourseUpdate'
+    delete:
+      tags:
+      - Course
+      summary: Hapus course
+      operationId: delete_api_course_course_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: Hanya admin aktif. Ditolak jika masih memiliki relasi database yang menghalangi penghapusan.
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /api/course/{id_course}/materi:
+    get:
+      tags:
+      - Materi
+      summary: Daftar materi course
+      operationId: get_api_course_id_course_materi
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  materi:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Materi'
+                required:
+                - materi
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      description: Urut berdasarkan urutan. User hanya melihat materi aktif pada course/kategori aktif; admin melihat
+        semua status.
+      parameters:
+      - name: id_course
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    post:
+      tags:
+      - Materi
+      summary: Tambah materi
+      operationId: post_api_course_id_course_materi
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  materi:
+                    $ref: '#/components/schemas/Materi'
+                required:
+                - message
+                - materi
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+      parameters:
+      - name: id_course
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MateriCreate'
+  /api/materi/{id_materi}:
+    get:
+      tags:
+      - Materi
+      summary: Detail materi
+      operationId: get_api_materi_id_materi
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  materi:
+                    $ref: '#/components/schemas/Materi'
+                required:
+                - materi
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      parameters:
+      - name: id_materi
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    patch:
+      tags:
+      - Materi
+      summary: Ubah materi
+      operationId: patch_api_materi_id_materi
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  materi:
+                    $ref: '#/components/schemas/Materi'
+                required:
+                - message
+                - materi
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+      parameters:
+      - name: id_materi
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MateriUpdate'
+    delete:
+      tags:
+      - Materi
+      summary: Hapus materi
+      operationId: delete_api_materi_id_materi
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+      parameters:
+      - name: id_materi
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /api/course/{id_course}/enrollment:
+    post:
+      tags:
+      - Enrollment
+      summary: Daftar ke course
+      operationId: post_api_course_id_course_enrollment
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  enrollment:
+                    $ref: '#/components/schemas/Enrollment'
+                required:
+                - message
+                - enrollment
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      description: Identitas diambil dari token. Body boleh tidak ada atau {}. Course/kategori harus aktif; enrollment
+        duplikat menghasilkan 409.
+      parameters:
+      - name: id_course
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyObject'
+  /api/me/enrollments:
+    get:
+      tags:
+      - Enrollment
+      summary: Daftar enrollment sendiri
+      operationId: get_api_me_enrollments
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enrollments:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Enrollment'
+                required:
+                - enrollments
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+      description: Urut id_user_course menurun, tanpa pagination.
+  /api/me/enrollments/{id_user_course}:
+    get:
+      tags:
+      - Enrollment
+      summary: Detail enrollment sendiri
+      operationId: get_api_me_enrollments_id_user_course
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enrollment:
+                    $ref: '#/components/schemas/Enrollment'
+                required:
+                - enrollment
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      parameters:
+      - name: id_user_course
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /api/me/materi/{id_materi}/progress:
+    get:
+      tags:
+      - Progress
+      summary: Progress materi sendiri
+      operationId: get_api_me_materi_id_materi_progress
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  progress:
+                    $ref: '#/components/schemas/MaterialProgress'
+                required:
+                - progress
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      description: Harus terdaftar pada course. GET tidak membuat record baru.
+      parameters:
+      - name: id_materi
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    patch:
+      tags:
+      - Progress
+      summary: Ubah progress materi sendiri
+      operationId: patch_api_me_materi_id_materi_progress
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  progress:
+                    $ref: '#/components/schemas/MaterialProgress'
+                  course_progress:
+                    $ref: '#/components/schemas/CourseProgress'
+                required:
+                - message
+                - progress
+                - course_progress
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '503':
+          $ref: '#/components/responses/Error503'
+      description: Memerlukan enrollment serta materi/course/kategori aktif. Menyinkronkan status dan tanggal selesai
+        enrollment; tidak mengubah status_test.
+      parameters:
+      - name: id_materi
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProgressUpdate'
+  /api/me/course/{id_course}/progress:
+    get:
+      tags:
+      - Progress
+      summary: Ringkasan progress course sendiri
+      operationId: get_api_me_course_id_course_progress
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  progress:
+                    $ref: '#/components/schemas/CourseProgress'
+                required:
+                - progress
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      description: Harus enrolled; hanya materi aktif dihitung. Course tanpa materi aktif menghasilkan progress
+        0.
+      parameters:
+      - name: id_course
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /api/courses/{course_id}/test:
+    get:
+      tags:
+      - Assessment
+      summary: Soal dan metadata final test
+      operationId: get_api_courses_course_id_test
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestDetail'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      description: test_id sama dengan course_id. Memerlukan course aktif dan enrollment. GET tidak membuat attempt;
+        discussion test tetap dapat diakses sebelum materi selesai.
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /api/courses/{course_id}/questions/{question_id}:
+    get:
+      tags:
+      - Assessment
+      summary: Detail soal aktif
+      operationId: get_api_courses_course_id_questions_question_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  question:
+                    $ref: '#/components/schemas/Question'
+                required:
+                - question
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - name: question_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /api/courses/{course_id}/test-attempts:
+    post:
+      tags:
+      - Assessment
+      summary: Mulai atau lanjutkan attempt
+      operationId: post_api_courses_course_id_test_attempts
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempt:
+                    $ref: '#/components/schemas/Attempt'
+                  questions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Question'
+                required:
+                - attempt
+                - questions
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '200':
+          description: Attempt aktif dilanjutkan, tanpa menambah jumlah attempt.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempt:
+                    $ref: '#/components/schemas/Attempt'
+                  questions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Question'
+                required:
+                - attempt
+                - questions
+      description: Body {} wajib. 200 melanjutkan attempt aktif, 201 membuat baru. Attempt baru memerlukan semua
+        materi aktif selesai, belum lulus, belum mencapai maksimal attempt, dan cooldown telah berakhir. Snapshot
+        soal/kunci/passing score dibekukan saat mulai.
+      parameters:
+      - name: course_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyObject'
+  /api/test-attempts/{attempt_id}:
+    get:
+      tags:
+      - Assessment
+      summary: Detail attempt sendiri
+      operationId: get_api_test_attempts_attempt_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempt:
+                    $ref: '#/components/schemas/Attempt'
+                required:
+                - attempt
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /api/test-attempts/{attempt_id}/answers:
+    post:
+      tags:
+      - Assessment
+      summary: Simpan atau perbarui jawaban
+      operationId: post_api_test_attempts_attempt_id_answers
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  attempt:
+                    $ref: '#/components/schemas/Attempt'
+                required:
+                - attempt
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      description: Hanya attempt sendiri yang in_progress. Validasi bulk atomik; soal duplikat ditolak.
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveAnswers'
+  /api/test-attempts/{attempt_id}/submit:
+    post:
+      tags:
+      - Assessment
+      summary: Submit dan hitung hasil ujian
+      operationId: post_api_test_attempts_attempt_id_submit
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestResult'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      description: Body {} wajib jika memakai jawaban tersimpan. Hanya pemilik attempt aktif; submit kedua ditolak
+        409. Kelulusan memperbarui enrollment, kegagalan dapat mengaktifkan cooldown.
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitAnswers'
+  /api/test-attempts/{attempt_id}/result:
+    get:
+      tags:
+      - Assessment
+      summary: Hasil attempt sendiri
+      operationId: get_api_test_attempts_attempt_id_result
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestResult'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      description: 409 jika attempt belum completed.
+      parameters:
+      - name: attempt_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+  /api/discussions/{context_type}/{context_id}:
+    get:
+      tags:
+      - Discussion
+      summary: Daftar komentar sesuai context
+      operationId: get_api_discussions_context_type_context_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  discussions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Discussion'
+                required:
+                - discussions
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+      description: context_id adalah id_materi untuk material, atau id_course untuk course/test. Memerlukan enrollment
+        dan course aktif; material harus aktif dan test harus memiliki soal aktif. Urut waktu lalu id_discussion.
+        Thread flat dengan parent_id; komentar tersembunyi beserta keturunannya tidak dikirim.
+      parameters:
+      - name: context_type
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - course
+          - material
+          - test
+      - name: context_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    post:
+      tags:
+      - Discussion
+      summary: Tambah komentar atau reply
+      operationId: post_api_discussions_context_type_context_id
+      responses:
+        '201':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  discussion:
+                    $ref: '#/components/schemas/Discussion'
+                required:
+                - discussion
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      description: context_id adalah id_materi untuk material, atau id_course untuk course/test. Memerlukan enrollment
+        dan course aktif; material harus aktif dan test harus memiliki soal aktif. Parent harus tersedia pada context
+        yang sama dan belum dihapus.
+      parameters:
+      - name: context_type
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - course
+          - material
+          - test
+      - name: context_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscussionCreate'
+  /api/discussions/{context_type}/{context_id}/{discussion_id}:
+    patch:
+      tags:
+      - Discussion
+      summary: Edit komentar sendiri
+      operationId: patch_api_discussions_context_type_context_id_discussion_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  discussion:
+                    $ref: '#/components/schemas/Discussion'
+                required:
+                - discussion
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      description: context_id adalah id_materi untuk material, atau id_course untuk course/test. Memerlukan enrollment
+        dan course aktif; material harus aktif dan test harus memiliki soal aktif. Hanya penulis komentar, termasuk
+        jika pemanggil adalah admin.
+      parameters:
+      - name: context_type
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - course
+          - material
+          - test
+      - name: context_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - name: discussion_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DiscussionUpdate'
+    delete:
+      tags:
+      - Discussion
+      summary: Soft delete komentar sendiri
+      operationId: delete_api_discussions_context_type_context_id_discussion_id
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  discussion:
+                    $ref: '#/components/schemas/Discussion'
+                required:
+                - discussion
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+      description: context_id adalah id_materi untuk material, atau id_course untuk course/test. Memerlukan enrollment
+        dan course aktif; material harus aktif dan test harus memiliki soal aktif. Body {} wajib. Hanya penulis;
+        reply dipertahankan.
+      parameters:
+      - name: context_type
+        in: path
+        required: true
+        schema:
+          type: string
+          enum:
+          - course
+          - material
+          - test
+      - name: context_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      - name: discussion_id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmptyObject'
+  /api/activity:
+    get:
+      tags:
+      - Reporting
+      summary: Log aktivitas
+      operationId: get_api_activity
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  activities:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Activity'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+                required:
+                - activities
+                - pagination
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+      x-required-role: admin
+      description: Hanya admin aktif. Urut waktu_dimulai lalu id_activity menurun. Login sukses sudah mencatat activity;
+        endpoint ini hanya membaca event tersimpan.
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+          default: 1
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+      - name: id_user
+        in: query
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967295
+      - name: jenis_aktivitas
+        in: query
+        schema:
+          type: string
+          enum:
+          - login
+          - buka_course
+          - buka_materi
+          - selesai_materi
+          - selesai_course
+          - mulai_test
+          - selesai_test
+  /api/dashboard:
+    get:
+      tags:
+      - Reporting
+      summary: Statistik identitas
+      operationId: get_api_dashboard
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dashboard'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+      x-required-role: admin
+      description: 'Hanya admin aktif. '
+  /api/leaderboard:
+    get:
+      tags:
+      - Reporting
+      summary: Status ketersediaan leaderboard
+      operationId: get_api_leaderboard
+      responses:
+        '501':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaderboardUnavailable'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+      description: Belum tersedia. Tidak mengembalikan ranking atau array kosong seolah-olah ranking sudah diimplementasikan.
+  /db-test:
+    get:
+      tags:
+      - Development
+      summary: Diagnostik database
+      operationId: get_db_test
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - success
+                  message:
+                    type: string
+                required:
+                - status
+                - message
+        '500':
+          description: Gagal; respons development dapat memuat detail error database.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - error
+                  message:
+                    type: string
+                required:
+                - status
+                - message
+        '404':
+          description: Endpoint dinonaktifkan.
+          content:
+            text/html:
+              schema:
+                type: string
+      security: []
+      description: 'Hanya terdaftar saat APP_ENV bukan production dan ENABLE_DEV_ROUTES=true. Tanpa token; jangan
+        diekspos ke publik. Pada production atau jika flag mati: 404.'
+      x-development-only: true
+  /user-test:
+    get:
+      tags:
+      - Development
+      summary: Diagnostik model user
+      operationId: get_user_test
+      responses:
+        '200':
+          description: Berhasil
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  properties:
+                    status:
+                      type: string
+                      enum:
+                      - success
+                    message:
+                      type: string
+                  required:
+                  - status
+                  - message
+                - type: object
+                  properties:
+                    status:
+                      type: string
+                      enum:
+                      - success
+                    user:
+                      type: object
+                      properties:
+                        id_user:
+                          type: integer
+                          format: int64
+                          minimum: 1
+                        nama:
+                          type: string
+                        email:
+                          type: string
+                        role:
+                          type: string
+                          enum:
+                          - admin
+                          - user
+                        status:
+                          type: string
+                          enum:
+                          - aktif
+                          - nonaktif
+                      required:
+                      - id_user
+                      - nama
+                      - email
+                      - role
+                      - status
+                  required:
+                  - status
+                  - user
+        '500':
+          description: Gagal; respons development dapat memuat detail error database.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - error
+                  message:
+                    type: string
+                required:
+                - status
+                - message
+        '404':
+          description: Endpoint dinonaktifkan.
+          content:
+            text/html:
+              schema:
+                type: string
+      security: []
+      description: 'Hanya terdaftar saat APP_ENV bukan production dan ENABLE_DEV_ROUTES=true. Tanpa token; jangan
+        diekspos ke publik. Pada production atau jika flag mati: 404.'
+      x-development-only: true
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'JWT HS256 dari login; Authorization: Bearer <token>. Berlaku 8 jam.'
+  responses:
+    Error400:
+      description: Payload atau parameter tidak valid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error401:
+      description: Token hilang/invalid/kedaluwarsa, akun tidak ditemukan, atau kredensial login salah.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error403:
+      description: Akun nonaktif, role tidak sesuai, bukan pemilik, atau prasyarat akses belum terpenuhi.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error404:
+      description: Data tidak ditemukan atau tidak dapat dilihat oleh pengguna.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error409:
+      description: Konflik data, relasi, konfigurasi test, atau status operasi.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error413:
+      description: Request terlalu besar.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error503:
+      description: Penyimpanan sementara tidak tersedia.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Message:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Operasi berhasil
+      required:
+      - message
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Data tidak valid
+      required:
+      - message
+    User:
+      type: object
+      properties:
+        id_user:
+          type: integer
+          format: int64
+          minimum: 1
+        nama:
+          type: string
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 150
+        user_profile:
+          type: object
+          properties:
+            no_hp:
+              anyOf:
+              - type: string
+                maxLength: 30
+              - type: 'null'
+          required:
+          - no_hp
+        divisi:
+          anyOf:
+          - type: string
+          - type: 'null'
+        jabatan:
+          anyOf:
+          - type: string
+          - type: 'null'
+        role:
+          type: string
+          enum:
+          - admin
+          - user
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+        foto_profil:
+          anyOf:
+          - type: string
+            description: URL foto lengkap atau string kosong jika dihapus.
+          - type: 'null'
+        tanggal_dibuat:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+        terakhir_login:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+      required:
+      - id_user
+      - nama
+      - email
+      - user_profile
+      - divisi
+      - jabatan
+      - role
+      - status
+      - foto_profil
+      - tanggal_dibuat
+      - terakhir_login
+    LoginUser:
+      type: object
+      properties:
+        id_user:
+          type: integer
+          format: int64
+          minimum: 1
+        nama:
+          type: string
+        email:
+          type: string
+        role:
+          type: string
+          enum:
+          - admin
+          - user
+      required:
+      - id_user
+      - nama
+      - email
+      - role
+    LoginResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        token:
+          type: string
+          description: JWT HS256; kedaluwarsa 8 jam setelah login.
+        user:
+          $ref: '#/components/schemas/LoginUser'
+      required:
+      - message
+      - token
+      - user
+    RegisterRequest:
+      type: object
+      properties:
+        nama:
+          type: string
+          minLength: 1
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 150
+        password:
+          type: string
+          minLength: 1
+          writeOnly: true
+      required:
+      - nama
+      - email
+      - password
+      additionalProperties: true
+      description: Field tambahan diabaikan. Registrasi publik selalu role=user dan status=aktif.
+      example:
+        nama: Pengguna Contoh
+        email: user@example.test
+        password: contoh-password-lokal
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+          writeOnly: true
+      required:
+      - email
+      - password
+      additionalProperties: true
+      example:
+        email: user@example.test
+        password: contoh-password-lokal
+    ProfileUpdate:
+      type: object
+      properties:
+        nama:
+          type: string
+          minLength: 1
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 150
+        divisi:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+        jabatan:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+        foto_profil:
+          anyOf:
+          - type: string
+            maxLength: 500
+            description: URL http/https; kosong/null menghapus foto. Upload multipart foto menggantikan field ini.
+          - type: 'null'
+        no_hp:
+          type: string
+          maxLength: 30
+          description: Angka, awalan +, spasi, (), dan -. String kosong menghapus nomor; field yang tidak dikirim
+            dipertahankan.
+      additionalProperties: false
+      minProperties: 1
+    ProfileUpload:
+      type: object
+      properties:
+        nama:
+          type: string
+          minLength: 1
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 150
+        divisi:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+        jabatan:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+        foto_profil:
+          anyOf:
+          - type: string
+            maxLength: 500
+            description: URL http/https; kosong/null menghapus foto. Upload multipart foto menggantikan field ini.
+          - type: 'null'
+        no_hp:
+          type: string
+          maxLength: 30
+          description: Angka, awalan +, spasi, (), dan -. String kosong menghapus nomor; field yang tidak dikirim
+            dipertahankan.
+        foto:
+          type: string
+          format: binary
+          description: Satu file JPG/PNG/WebP, maksimal 2 MiB dan 16 megapiksel. Disimpan ulang sebagai PNG maksimal
+            1024×1024.
+      additionalProperties: false
+      minProperties: 1
+    UserCreate:
+      type: object
+      properties:
+        nama:
+          type: string
+          minLength: 1
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 150
+        divisi:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+        jabatan:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+        foto_profil:
+          anyOf:
+          - type: string
+            maxLength: 500
+            description: URL http/https; kosong/null menghapus foto. Upload multipart foto menggantikan field ini.
+          - type: 'null'
+        no_hp:
+          type: string
+          maxLength: 30
+          description: Angka, awalan +, spasi, (), dan -. String kosong menghapus nomor; field yang tidak dikirim
+            dipertahankan.
+        password:
+          type: string
+          minLength: 1
+          writeOnly: true
+        role:
+          type: string
+          enum:
+          - admin
+          - user
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+      required:
+      - nama
+      - email
+      - password
+      additionalProperties: false
+      description: Role default user; status default aktif.
+    UserUpdate:
+      type: object
+      properties:
+        nama:
+          type: string
+          minLength: 1
+          maxLength: 150
+        email:
+          type: string
+          format: email
+          maxLength: 150
+        divisi:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+        jabatan:
+          anyOf:
+          - type: string
+            maxLength: 100
+          - type: 'null'
+        foto_profil:
+          anyOf:
+          - type: string
+            maxLength: 500
+            description: URL http/https; kosong/null menghapus foto. Upload multipart foto menggantikan field ini.
+          - type: 'null'
+        no_hp:
+          type: string
+          maxLength: 30
+          description: Angka, awalan +, spasi, (), dan -. String kosong menghapus nomor; field yang tidak dikirim
+            dipertahankan.
+        role:
+          type: string
+          enum:
+          - admin
+          - user
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+      additionalProperties: false
+      minProperties: 1
+      description: Password tidak dapat diubah melalui endpoint ini. Admin tidak dapat menurunkan role/menonaktifkan
+        dirinya atau admin aktif terakhir.
+    KategoriCreate:
+      type: object
+      properties:
+        nama_kategori:
+          type: string
+          minLength: 1
+          maxLength: 100
+        thumbnail:
+          anyOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+      required:
+      - nama_kategori
+      additionalProperties: false
+      description: Status default aktif.
+    KategoriUpdate:
+      type: object
+      properties:
+        nama_kategori:
+          type: string
+          minLength: 1
+          maxLength: 100
+        thumbnail:
+          anyOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+      additionalProperties: false
+      minProperties: 1
+    Kategori:
+      type: object
+      properties:
+        id_kategori:
+          type: integer
+          format: int64
+          minimum: 1
+        nama_kategori:
+          type: string
+          minLength: 1
+          maxLength: 100
+        thumbnail:
+          anyOf:
+          - type: string
+            maxLength: 255
+          - type: 'null'
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+        tanggal_dibuat:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+        tanggal_diperbarui:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+      required:
+      - id_kategori
+      - nama_kategori
+      - thumbnail
+      - status
+      - tanggal_dibuat
+      - tanggal_diperbarui
+    CourseCreate:
+      type: object
+      properties:
+        judul_course:
+          type: string
+          minLength: 1
+          maxLength: 150
+        deskripsi:
+          anyOf:
+          - type: string
+            description: Maksimal 65535 byte UTF-8.
+          - type: 'null'
+        id_kategori:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967295
+        key_point:
+          anyOf:
+          - type: string
+            description: Maksimal 65535 byte UTF-8.
+          - type: 'null'
+        credit:
+          anyOf:
+          - type: string
+            maxLength: 150
+          - type: 'null'
+        thumbnail:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+      required:
+      - judul_course
+      - id_kategori
+      additionalProperties: false
+      description: Status default aktif.
+    CourseUpdate:
+      type: object
+      properties:
+        judul_course:
+          type: string
+          minLength: 1
+          maxLength: 150
+        deskripsi:
+          anyOf:
+          - type: string
+            description: Maksimal 65535 byte UTF-8.
+          - type: 'null'
+        id_kategori:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967295
+        key_point:
+          anyOf:
+          - type: string
+            description: Maksimal 65535 byte UTF-8.
+          - type: 'null'
+        credit:
+          anyOf:
+          - type: string
+            maxLength: 150
+          - type: 'null'
+        thumbnail:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+      additionalProperties: false
+      minProperties: 1
+    Course:
+      type: object
+      properties:
+        id_course:
+          type: integer
+          format: int64
+          minimum: 1
+        judul_course:
+          type: string
+          minLength: 1
+          maxLength: 150
+        deskripsi:
+          anyOf:
+          - type: string
+            description: Maksimal 65535 byte UTF-8.
+          - type: 'null'
+        id_kategori:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 4294967295
+        key_point:
+          anyOf:
+          - type: string
+            description: Maksimal 65535 byte UTF-8.
+          - type: 'null'
+        credit:
+          anyOf:
+          - type: string
+            maxLength: 150
+          - type: 'null'
+        thumbnail:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+        tanggal_dibuat:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+        tanggal_diperbarui:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+      required:
+      - id_course
+      - judul_course
+      - deskripsi
+      - id_kategori
+      - key_point
+      - credit
+      - thumbnail
+      - status
+      - tanggal_dibuat
+      - tanggal_diperbarui
+    MateriCreate:
+      type: object
+      properties:
+        judul_materi:
+          type: string
+          minLength: 1
+          maxLength: 150
+        jenis_file:
+          type: string
+          enum:
+          - pdf
+          - youtube
+          - drive
+        tautan_file:
+          type: string
+          minLength: 1
+          maxLength: 500
+        durasi:
+          anyOf:
+          - type: integer
+            minimum: 0
+            maximum: 4294967295
+          - type: 'null'
+        urutan:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+      required:
+      - judul_materi
+      - jenis_file
+      - tautan_file
+      additionalProperties: false
+      description: Status default aktif. Urutan default 1.
+    MateriUpdate:
+      type: object
+      properties:
+        judul_materi:
+          type: string
+          minLength: 1
+          maxLength: 150
+        jenis_file:
+          type: string
+          enum:
+          - pdf
+          - youtube
+          - drive
+        tautan_file:
+          type: string
+          minLength: 1
+          maxLength: 500
+        durasi:
+          anyOf:
+          - type: integer
+            minimum: 0
+            maximum: 4294967295
+          - type: 'null'
+        urutan:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+      additionalProperties: false
+      minProperties: 1
+    Materi:
+      type: object
+      properties:
+        id_materi:
+          type: integer
+          format: int64
+          minimum: 1
+        id_course:
+          type: integer
+          format: int64
+          minimum: 1
+        judul_materi:
+          type: string
+          minLength: 1
+          maxLength: 150
+        jenis_file:
+          type: string
+          enum:
+          - pdf
+          - youtube
+          - drive
+        tautan_file:
+          type: string
+          minLength: 1
+          maxLength: 500
+        durasi:
+          anyOf:
+          - type: integer
+            minimum: 0
+            maximum: 4294967295
+          - type: 'null'
+        urutan:
+          type: integer
+          minimum: 0
+          maximum: 65535
+        status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+        tanggal_dibuat:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+        tanggal_diperbarui:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+      required:
+      - id_materi
+      - id_course
+      - judul_materi
+      - jenis_file
+      - tautan_file
+      - durasi
+      - urutan
+      - status
+      - tanggal_dibuat
+      - tanggal_diperbarui
+    Enrollment:
+      type: object
+      properties:
+        id_user_course:
+          type: integer
+          format: int64
+          minimum: 1
+        id_user:
+          type: integer
+          format: int64
+          minimum: 1
+        id_course:
+          type: integer
+          format: int64
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - belum_mulai
+          - berlangsung
+          - selesai
+        tanggal_mulai:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+        tanggal_selesai:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+      required:
+      - id_user_course
+      - id_user
+      - id_course
+      - status
+      - tanggal_mulai
+      - tanggal_selesai
+    MaterialProgress:
+      type: object
+      properties:
+        id_user_materi:
+          anyOf:
+          - type: integer
+            format: int64
+            minimum: 1
+          - type: 'null'
+        id_user:
+          type: integer
+          format: int64
+          minimum: 1
+        id_materi:
+          type: integer
+          format: int64
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - belum_mulai
+          - berlangsung
+          - selesai
+        waktu_mulai:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+        waktu_selesai:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+        durasi:
+          anyOf:
+          - type: integer
+            minimum: 0
+            maximum: 4294967295
+          - type: 'null'
+      required:
+      - id_user_materi
+      - id_user
+      - id_materi
+      - status
+      - waktu_mulai
+      - waktu_selesai
+      - durasi
+      description: GET sebelum ada record menghasilkan status virtual belum_mulai dan id_user_materi=null tanpa
+        menulis database.
+    ProgressUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - belum_mulai
+          - berlangsung
+          - selesai
+        durasi:
+          anyOf:
+          - type: integer
+            minimum: 0
+            maximum: 4294967295
+          - type: 'null'
+      additionalProperties: false
+      minProperties: 1
+      example:
+        status: selesai
+        durasi: 300
+    CourseProgress:
+      type: object
+      properties:
+        id_course:
+          type: integer
+          format: int64
+          minimum: 1
+        total_materi:
+          type: integer
+          minimum: 0
+        materi_selesai:
+          type: integer
+          minimum: 0
+        progress:
+          type: number
+          minimum: 0
+          maximum: 100
+        status:
+          type: string
+          enum:
+          - belum_mulai
+          - berlangsung
+          - selesai
+        materi:
+          type: array
+          items:
+            type: object
+            properties:
+              id_materi:
+                type: integer
+                format: int64
+                minimum: 1
+              judul_materi:
+                type: string
+              urutan:
+                type: integer
+                minimum: 0
+              status:
+                type: string
+                enum:
+                - belum_mulai
+                - berlangsung
+                - selesai
+            required:
+            - id_materi
+            - judul_materi
+            - urutan
+            - status
+      required:
+      - id_course
+      - total_materi
+      - materi_selesai
+      - progress
+      - status
+      - materi
+    Question:
+      type: object
+      properties:
+        question_id:
+          type: integer
+          format: int64
+          minimum: 1
+        number:
+          type: integer
+        pertanyaan:
+          type: string
+        options:
+          type: array
+          items:
+            type: object
+            properties:
+              option_id:
+                type: integer
+                format: int64
+                minimum: 1
+              text:
+                type: string
+            required:
+            - option_id
+            - text
+      required:
+      - question_id
+      - number
+      - pertanyaan
+      - options
+      description: Kunci jawaban tidak pernah disertakan.
+    Answer:
+      type: object
+      properties:
+        question_id:
+          type: integer
+          format: int64
+          minimum: 1
+        selected_option_id:
+          type: integer
+          format: int64
+          minimum: 1
+      required:
+      - question_id
+      - selected_option_id
+      additionalProperties: false
+    Attempt:
+      type: object
+      properties:
+        attempt_id:
+          type: integer
+          format: int64
+          minimum: 1
+        course_id:
+          type: integer
+          format: int64
+          minimum: 1
+        test_id:
+          type: integer
+          format: int64
+          minimum: 1
+        attempt_number:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - in_progress
+          - completed
+        started_at:
+          anyOf:
+          - type: string
+            format: date-time
+            example: '2026-10-06T03:30:00Z'
+          - type: 'null'
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+            example: '2026-10-06T03:30:00Z'
+          - type: 'null'
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Answer'
+      required:
+      - attempt_id
+      - course_id
+      - test_id
+      - attempt_number
+      - status
+      - started_at
+      - completed_at
+      - answers
+    TestResult:
+      type: object
+      properties:
+        attempt_id:
+          type: integer
+          format: int64
+          minimum: 1
+        course_id:
+          type: integer
+          format: int64
+          minimum: 1
+        test_id:
+          type: integer
+          format: int64
+          minimum: 1
+        total_questions:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+        answered_questions:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+        correct_answers:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+        wrong_answers:
+          anyOf:
+          - type: integer
+            minimum: 0
+          - type: 'null'
+        score:
+          type: number
+        passing_score:
+          anyOf:
+          - type: integer
+          - type: 'null'
+        passed:
+          type: boolean
+        completed_at:
+          anyOf:
+          - type: string
+            format: date-time
+            example: '2026-10-06T03:30:00Z'
+          - type: 'null'
+      required:
+      - attempt_id
+      - course_id
+      - test_id
+      - total_questions
+      - answered_questions
+      - correct_answers
+      - wrong_answers
+      - score
+      - passing_score
+      - passed
+      - completed_at
+      description: Untuk record legacy tanpa snapshot, total/answered/correct/wrong/passing_score bernilai null.
+        Soal tidak dijawab dihitung salah. Score disimpan dua desimal; kelulusan dihitung sebelum pembulatan.
+    TestDetail:
+      type: object
+      properties:
+        course_id:
+          type: integer
+          format: int64
+          minimum: 1
+        test_id:
+          type: integer
+          format: int64
+          minimum: 1
+        passing_score:
+          type: integer
+        max_attempts:
+          type: integer
+        attempts_used:
+          type: integer
+          minimum: 0
+        materials_completed:
+          type: boolean
+        test_access_status:
+          type: string
+          enum:
+          - aktif
+          - nonaktif
+          - lulus
+        retry_at:
+          anyOf:
+          - type: string
+            format: date-time
+            example: '2026-10-06T03:30:00Z'
+          - type: 'null'
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Question'
+        active_attempt:
+          anyOf:
+          - $ref: '#/components/schemas/Attempt'
+          - type: 'null'
+        latest_result:
+          anyOf:
+          - $ref: '#/components/schemas/TestResult'
+          - type: 'null'
+      required:
+      - course_id
+      - test_id
+      - passing_score
+      - max_attempts
+      - attempts_used
+      - materials_completed
+      - test_access_status
+      - retry_at
+      - questions
+      - active_attempt
+      - latest_result
+    EmptyObject:
+      type: object
+      properties: {}
+      additionalProperties: false
+      example: {}
+    SaveAnswers:
+      type: object
+      properties:
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Answer'
+          minItems: 1
+      required:
+      - answers
+      additionalProperties: false
+      description: ID soal harus unik, berasal dari snapshot attempt, dan option harus milik soal. Maksimal sebanyak
+        soal dalam attempt.
+      example:
+        answers:
+        - question_id: 1
+          selected_option_id: 11
+    SubmitAnswers:
+      type: object
+      properties:
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Answer'
+          minItems: 1
+      additionalProperties: false
+      description: Kirim {} untuk submit jawaban tersimpan. Jika answers dikirim, array tidak boleh kosong. Field
+        nilai/identitas ditolak.
+      example: {}
+    Discussion:
+      type: object
+      properties:
+        discussion_id:
+          type: integer
+          format: int64
+          minimum: 1
+        user_id:
+          type: integer
+          format: int64
+          minimum: 1
+        user:
+          type: object
+          properties:
+            id_user:
+              type: integer
+              format: int64
+              minimum: 1
+            nama:
+              type: string
+          required:
+          - id_user
+          - nama
+        context_type:
+          type: string
+          enum:
+          - course
+          - material
+          - test
+        context_id:
+          type: integer
+          format: int64
+          minimum: 1
+        parent_id:
+          anyOf:
+          - type: integer
+            format: int64
+            minimum: 1
+          - type: 'null'
+        content:
+          type: string
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+            example: '2026-10-06T03:30:00Z'
+          - type: 'null'
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+            example: '2026-10-06T03:30:00Z'
+          - type: 'null'
+        deleted:
+          type: boolean
+      required:
+      - discussion_id
+      - user_id
+      - user
+      - context_type
+      - context_id
+      - parent_id
+      - content
+      - created_at
+      - updated_at
+      - deleted
+      description: Soft delete mengosongkan content dan menetapkan deleted=true; reply tetap dipertahankan.
+    DiscussionCreate:
+      type: object
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Di-trim; tidak boleh hanya whitespace.
+        parent_id:
+          anyOf:
+          - type: integer
+            format: int64
+            minimum: 1
+          - type: 'null'
+      required:
+      - content
+      additionalProperties: false
+      example:
+        content: Bagaimana penerapan materi ini?
+        parent_id: null
+    DiscussionUpdate:
+      type: object
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+          description: Di-trim; tidak boleh hanya whitespace.
+      required:
+      - content
+      additionalProperties: false
+    Activity:
+      type: object
+      properties:
+        id_activity:
+          type: integer
+          format: int64
+          minimum: 1
+        id_user:
+          type: integer
+          format: int64
+          minimum: 1
+        id_course:
+          anyOf:
+          - type: integer
+            format: int64
+            minimum: 1
+          - type: 'null'
+        id_materi:
+          anyOf:
+          - type: integer
+            format: int64
+            minimum: 1
+          - type: 'null'
+        id_penilaian:
+          anyOf:
+          - type: integer
+            format: int64
+            minimum: 1
+          - type: 'null'
+        jenis_aktivitas:
+          type: string
+          enum:
+          - login
+          - buka_course
+          - buka_materi
+          - selesai_materi
+          - selesai_course
+          - mulai_test
+          - selesai_test
+        durasi:
+          anyOf:
+          - type: integer
+            minimum: 0
+            maximum: 4294967295
+          - type: 'null'
+        waktu_dimulai:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+        waktu_selesai:
+          anyOf:
+          - type: string
+            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            example: '2026-10-06T10:30:00'
+          - type: 'null'
+      required:
+      - id_activity
+      - id_user
+      - id_course
+      - id_materi
+      - id_penilaian
+      - jenis_aktivitas
+      - durasi
+      - waktu_dimulai
+      - waktu_selesai
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+        per_page:
+          type: integer
+          minimum: 1
+        total:
+          type: integer
+          minimum: 0
+        pages:
+          type: integer
+          minimum: 0
+      required:
+      - page
+      - per_page
+      - total
+      - pages
+    Dashboard:
+      type: object
+      properties:
+        identity:
+          type: object
+          properties:
+            total_users:
+              type: integer
+              minimum: 0
+            active_users:
+              type: integer
+              minimum: 0
+            inactive_users:
+              type: integer
+              minimum: 0
+            admins:
+              type: integer
+              minimum: 0
+            regular_users:
+              type: integer
+              minimum: 0
+          required:
+          - total_users
+          - active_users
+          - inactive_users
+          - admins
+          - regular_users
+        learning:
+          type: 'null'
+        assessment:
+          type: 'null'
+        dependencies:
+          type: array
+          items:
+            type: string
+      required:
+      - identity
+      - learning
+      - assessment
+      - dependencies
+      description: Statistik learning dan assessment belum diimplementasikan, sehingga selalu null.
+    LeaderboardUnavailable:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - pending_dependencies
+        message:
+          type: string
+        dependencies:
+          type: array
+          items:
+            type: string
+      required:
+      - status
+      - message
+      - dependencies
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - ok
+          - not_ready
+      required:
+      - status
