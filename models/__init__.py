@@ -5,3 +5,4 @@ from .course import Course
 from .materi import Materi
 from .user_course import UserCourse
 from .user_materi import UserMateri
+from .learning import Material, Enrollment, MaterialProgress, Question, Option, TestAttempt, UserAnswer, Discussion

@@ -1,4 +1,4 @@
-﻿from extensions import db
+from extensions import db
 from sqlalchemy.dialects.mysql import BIGINT, INTEGER
 
 
@@ -10,7 +10,7 @@ class UserCourse(db.Model):
         db.Index("idx_user_course_status", "status"), db.Index("idx_user_course_status_test", "status_test"),
         db.Index("idx_user_course_test_access", "test_dapat_diakses_lagi"),
     )
-    id_user_course = db.Column(BIGINT(unsigned=True), primary_key=True, autoincrement=True)
+    id_user_course = db.Column(db.Integer().with_variant(BIGINT(unsigned=True), "mysql"), primary_key=True, autoincrement=True)
     id_user = db.Column(INTEGER(unsigned=True), db.ForeignKey("users.id_user", name="fk_user_course_user", onupdate="CASCADE"), nullable=False)
     id_course = db.Column(INTEGER(unsigned=True), db.ForeignKey("course.id_course", name="fk_user_course_course", onupdate="CASCADE"), nullable=False)
     tanggal_mulai = db.Column(db.DateTime, nullable=False, server_default=db.func.current_timestamp())

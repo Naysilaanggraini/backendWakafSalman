@@ -15,7 +15,7 @@ class Course(db.Model):
     credit = db.Column(db.String(150), nullable=True)
     thumbnail = db.Column(db.String(500), nullable=True)
     # Existing schema fields; managed by the assessment developer, not this API.
-    passing_grade = db.Column(TINYINT(unsigned=True), nullable=False, server_default="70")
+    passing_grade = db.Column(db.SmallInteger().with_variant(TINYINT(unsigned=True), "mysql"), nullable=False, server_default="70")
     maksimal_attempt = db.Column(SMALLINT(unsigned=True), nullable=False, server_default="3")
     masa_tunggu_test_hari = db.Column(SMALLINT(unsigned=True), nullable=False, server_default="7")
     status = db.Column(db.Enum("aktif", "nonaktif"), nullable=False, server_default="aktif")
@@ -24,6 +24,8 @@ class Course(db.Model):
         server_default=db.func.current_timestamp(), server_onupdate=db.FetchedValue())
     kategori = db.relationship("Kategori", back_populates="courses")
     materi = db.relationship("Materi", back_populates="course", passive_deletes="all")
+
+    questions = db.relationship("Question", back_populates="course", order_by="Question.urutan")
 
     def to_dict(self):
         return {

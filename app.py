@@ -11,6 +11,8 @@ from routes.course import course_bp
 from routes.materi import materi_bp
 from routes.enrollment import enrollment_bp
 from routes.progress import progress_bp
+from routes.tests import tests_bp
+from routes.discussions import discussions_bp
 
 
 def create_app():
@@ -33,6 +35,8 @@ def create_app():
     app.register_blueprint(materi_bp)
     app.register_blueprint(enrollment_bp)
     app.register_blueprint(progress_bp)
+    app.register_blueprint(tests_bp)
+    app.register_blueprint(discussions_bp)
 
     @app.route("/")
     def home():
