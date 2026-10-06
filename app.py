@@ -6,6 +6,11 @@ from extensions import db, migrate
 from models import User
 from routes.auth import auth_bp
 from routes.users import users_bp
+from routes.kategori import kategori_bp
+from routes.course import course_bp
+from routes.materi import materi_bp
+from routes.enrollment import enrollment_bp
+from routes.progress import progress_bp
 
 
 def create_app():
@@ -23,6 +28,11 @@ def create_app():
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(users_bp)
+    app.register_blueprint(kategori_bp)
+    app.register_blueprint(course_bp)
+    app.register_blueprint(materi_bp)
+    app.register_blueprint(enrollment_bp)
+    app.register_blueprint(progress_bp)
 
     @app.route("/")
     def home():
