@@ -247,6 +247,53 @@ git push -u origin main
 
 ## Developer 3: Test & Discussion
 
+### Manage Test Admin — integrasi database
+
+Endpoint baru (JWT akun admin aktif):
+
+| Method | Endpoint | Fungsi |
+|---|---|---|
+| GET | `/api/admin/courses/<course_id>/test` | Course, settings, seluruh soal termasuk nonaktif, pilihan dan kunci admin |
+| PATCH | `/api/admin/courses/<course_id>/test` | `passing_grade` (0–100), `maksimal_attempt` (1–65535), `masa_tunggu_test_hari` (0–65535) |
+| POST | `/api/admin/courses/<course_id>/test/questions` | Membuat soal dan pilihan dalam satu transaksi |
+| PATCH | `/api/admin/courses/<course_id>/test/questions/<question_id>` | Menyimpan versi baru dan menonaktifkan versi lama |
+| DELETE | `/api/admin/courses/<course_id>/test/questions/<question_id>` | Menonaktifkan soal tanpa menghapus FK/attempt |
+
+Payload soal: `pertanyaan`, `urutan`, `status` (`aktif`/`nonaktif`),
+`options: [{text, urutan, is_correct}]`. Wajib 2–6 pilihan berbeda, tepat satu kunci.
+PATCH soal mengembalikan ID versi baru; client harus memuat ulang konfigurasi.
+Pilihan lama tetap terikat pada soal lama agar jawaban snapshot dapat disimpan
+dan dinilai sesudah admin mengedit. Model pilihan tidak mempunyai status aktif;
+keaktifan mengikuti versi soal. Judul test diturunkan dari course karena schema
+tidak mempunyai field judul test terpisah.
+
+GET learner tetap kompatibel dan menambah `can_start`/`access_reason` sebagai
+keputusan akses backend. Saat attempt aktif, soal/detail dan passing score memakai
+snapshot. Kunci hanya terdapat pada API admin/private snapshot, tidak pada API learner.
+Migration resmi tetap `0002_assessment`; tidak ada migration/model baru.
+
+QA development eksplisit (menambah konten test/attempt, bukan seed startup):
+
+```powershell
+# Jalankan API development pada localhost:5000 terlebih dahulu.
+# Dari repository frontend; browser origin sesuai CORS localhost:5173:
+$env:RUN_LIVE_TEST_QA='1'
+node tests/test-integration-browser.mjs
+# Dari repository backend, skenario user pembanding:
+$env:RUN_LIVE_TEST_QA='1'
+.\venv\Scripts\python.exe -m tests.live_assessment_qa
+```
+
+Runner browser menangkap helper `tests.development_sessions` secara privat untuk
+JWT singkat berdasarkan mekanisme fixture existing dan `token_required`. Jangan
+menjalankan helper langsung ke terminal: stdout berisi sesi. Tidak ada HTTP bypass,
+perubahan password atau perubahan akun. Helper hanya menerima konfigurasi development.
+Login browser menggunakan password existing **belum diuji**, kredensial tidak tersedia
+di project. Runner API pembanding menambah enrollment/progress dan attempt gagal
+untuk user existing 1; tidak melewati cooldown dan tidak menghapus attempt.
+Attempt limit tiga kali serta kedaluwarsa cooldown diuji pada fixture ORM terisolasi,
+bukan dengan mengubah waktu/cooldown JaxonUser pada database development.
+
 ### Analisis dan batas integrasi existing
 
 Source of truth: `schema.sql`, `models/user.py`, `routes/auth.py`, `src/api/axiosInstance.js`, `src/store/{courseStore,userLearningStore,authStore}.js`, `src/data/userLearningData.js`, `src/pages/user/{CourseDetail,FinalTest}.jsx`, `src/components/user/{CourseDiscussion,CourseMaterial,CourseMaterialNavigation,CourseInformation}.jsx`, dan routing frontend existing. Backend menggunakan Flask + SQLAlchemy + Flask-Migrate + MySQL/MariaDB/PyMySQL. Authentication tetap JWT HS256 delapan jam dari login existing; response error tetap `{"message":"..."}`.

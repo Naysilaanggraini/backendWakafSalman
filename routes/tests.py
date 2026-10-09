@@ -78,6 +78,29 @@ def ready(course, enrollment):
     return bool(ids) and set(ids) <= completed
 
 
+def access_decision(course, enrollment, attempts, active, questions, completed):
+    if active:
+        return True, "Continue your active attempt."
+    if enrollment.status_test == "lulus" or any(a.status == "lulus" for a in attempts):
+        return False, "Test sudah lulus."
+    if len(attempts) >= course.maksimal_attempt:
+        return False, "Batas attempt sudah tercapai."
+    retry = enrollment.test_dapat_diakses_lagi
+    if retry and retry > utcnow():
+        return False, "Masa tunggu test belum selesai."
+    if enrollment.status_test == "nonaktif" and not retry:
+        return False, "Akses test belum aktif."
+    if not completed:
+        return False, "Selesaikan seluruh materi terlebih dahulu."
+    if not questions:
+        return False, "Belum ada soal untuk test ini."
+    if any(len(q.options) < 2 or sum(bool(o.is_benar) for o in q.options) != 1 for q in questions):
+        return False, "Konfigurasi soal belum valid."
+    if not 0 <= course.passing_grade <= 100:
+        return False, "Passing score tidak valid."
+    return True, "Test tersedia."
+
+
 @tests_bp.get("/courses/<int:course_id>/test")
 @token_required
 def get_test(user, course_id):
@@ -89,9 +112,12 @@ def get_test(user, course_id):
     latest = next((a for a in attempts if a.status_attempt == "completed"), None)
     if not questions and not active and not latest:
         raise LearningError("Test tidak ditemukan", 404)
-    return {"course_id": course_id, "test_id": course_id, "passing_score": course.passing_grade,
+    completed = ready(course, enrollment)
+    allowed, reason = access_decision(course, enrollment, attempts, active, questions, completed)
+    return {"course_id": course_id, "test_id": course_id, "passing_score": active.passing_grade if active else course.passing_grade,
             "max_attempts": course.maksimal_attempt, "attempts_used": len(attempts),
-            "materials_completed": ready(course, enrollment), "test_access_status": enrollment.status_test,
+            "materials_completed": completed, "test_access_status": enrollment.status_test,
+            "can_start": allowed, "access_reason": reason,
             "retry_at": iso(enrollment.test_dapat_diakses_lagi),
             "questions": public_questions(active.question_snapshot if active else [snapshot_question(q) for q in questions]),
             "active_attempt": attempt_data(active) if active else None,
@@ -102,6 +128,13 @@ def get_test(user, course_id):
 @token_required
 def get_question(user, course_id, question_id):
     course_access(user, course_id)
+    active = db.session.execute(db.select(TestAttempt).where(TestAttempt.id_user == user.id_user,
+        TestAttempt.id_course == course_id, TestAttempt.status_attempt == "in_progress")).scalar_one_or_none()
+    if active:
+        frozen = next((q for q in active.question_snapshot if q["question_id"] == question_id), None)
+        if not frozen:
+            raise LearningError("Soal bukan bagian dari attempt aktif", 404)
+        return {"question": public_questions([frozen])[0]}, 200
     question = db.session.get(Question, question_id)
     if not question or question.id_course != course_id or question.status != "aktif":
         raise LearningError("Soal tidak ditemukan", 404)
@@ -225,6 +258,9 @@ def submit_test(user, attempt_id):
     elif course.masa_tunggu_test_hari:
         enrollment.status_test = "nonaktif"
         enrollment.test_dapat_diakses_lagi = attempt.waktu_selesai + timedelta(days=course.masa_tunggu_test_hari)
+    else:
+        enrollment.status_test = "aktif"
+        enrollment.test_dapat_diakses_lagi = None
     db.session.commit()
     return result_data(attempt), 200
 

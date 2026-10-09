@@ -15,9 +15,9 @@ from routes.materi import materi_bp
 from routes.enrollment import enrollment_bp
 from routes.progress import progress_bp
 from routes.tests import tests_bp
+from routes.admin_tests import admin_tests_bp
 from routes.discussions import discussions_bp
 from routes.reporting import reporting_bp
-
 
 def create_app(test_config=None):
     app = Flask(__name__)
@@ -47,6 +47,7 @@ def create_app(test_config=None):
     app.register_blueprint(enrollment_bp)
     app.register_blueprint(progress_bp)
     app.register_blueprint(tests_bp)
+    app.register_blueprint(admin_tests_bp)
     app.register_blueprint(discussions_bp)
     app.register_blueprint(reporting_bp)
 
