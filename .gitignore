@@ -25,6 +25,7 @@ __pycache__/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+test-results.txt
 
 # Local editors and OS files
 .vscode/

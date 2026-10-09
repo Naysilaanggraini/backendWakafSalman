@@ -4,7 +4,7 @@ info:
   title: Lentera — LMS Wakaf Salman API
   version: 1.0.0
   description: |-
-    Kontrak berdasarkan implementasi Flask di repository. Gunakan Bearer JWT dari POST /api/auth/login; tidak ada refresh token/logout endpoint. Role dan status akun dibaca ulang dari database pada setiap request.
+    Kontrak berdasarkan implementasi Flask di repository. Gunakan Bearer JWT dari POST /api/auth/login. Logout tercatat melalui POST /api/auth/logout; token baru yang terkait sesi login tersebut ditolak setelah logout. Role dan status akun dibaca ulang dari database pada setiap request.
 
     Path learning memakai /api/course (singular); assessment memakai /api/courses (plural). ID berasal dari database, bukan ID contoh/frontend. Daftar katalog/user/enrollment tidak memiliki pagination; hanya activity mendukung pagination.
 
@@ -37,6 +37,161 @@ tags:
 security:
 - bearerAuth: []
 paths:
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Catat logout dan akhiri tracking sesi login
+      operationId: logoutSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id]
+              properties:
+                request_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Logout tercatat, idempotent berdasarkan request dan sesi login}
+        '400': {$ref: '#/components/responses/Error400'}
+        '401': {$ref: '#/components/responses/Error401'}
+  /api/me/activity:
+    post:
+      tags: [Reporting]
+      summary: Heartbeat aktivitas terautentikasi
+      operationId: trackForegroundActivity
+      description: Interval server maksimal 45 detik; actor berasal dari JWT. Lease per actor dan jenis mencegah durasi ganda lintas tab. Sesi berarti waktu aktif website, bukan seluruh selang login/logout. Tidak menerima durasi atau user_id dari klien.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, kind, action]
+              properties:
+                request_id: {type: string, format: uuid}
+                kind: {type: string, enum: [sesi, buka_dashboard, buka_course, buka_materi, putar_video]}
+                previous_request_id: {type: string, format: uuid, description: Tutup segmen sebelumnya milik actor/jenis yang sama pada refresh/perpindahan konteks}
+                action: {type: string, enum: [active, pause, end]}
+                course_id: {type: integer, minimum: 1}
+                material_id: {type: integer, minimum: 1}
+      responses:
+        '200': {description: Activity dan finished dari database}
+        '400': {$ref: '#/components/responses/Error400'}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+  /api/admin/discussions:
+    get:
+      tags: [Discussion]
+      summary: Daftar seluruh discussion untuk moderasi admin
+      operationId: listAdminDiscussions
+      x-required-role: admin
+      parameters:
+      - {name: search, in: query, schema: {type: string, maxLength: 200}}
+      - {name: course_id, in: query, schema: {type: integer, minimum: 1}}
+      - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+      - {name: per_page, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: Discussions dengan user/course/material/status dan pagination}
+        '401': {$ref: '#/components/responses/Error401'}
+        '403': {$ref: '#/components/responses/Error403'}
+  /api/admin/discussions/{discussion_id}:
+    patch:
+      tags: [Discussion]
+      summary: Sembunyikan atau tampilkan komentar (subtree mengikuti parent)
+      operationId: moderateDiscussion
+      x-required-role: admin
+      parameters:
+      - {name: discussion_id, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status]
+              properties:
+                status: {type: string, enum: [tampil, disembunyikan]}
+      responses:
+        '200': {description: Discussion yang tersimpan}
+        '400': {$ref: '#/components/responses/Error400'}
+        '403': {$ref: '#/components/responses/Error403'}
+  /api/admin/courses/{course_id}/test:
+    parameters:
+    - {name: course_id, in: path, required: true, schema: {type: integer, minimum: 1}}
+    get:
+      tags: [Assessment]
+      operationId: getAdminTest
+      summary: Soal, kunci, dan pengaturan course untuk admin
+      x-required-role: admin
+      responses:
+        '200': {description: Course, passing_grade, maksimal_attempt, masa_tunggu_test_hari, questions}
+        '403': {$ref: '#/components/responses/Error403'}
+    patch:
+      tags: [Assessment]
+      operationId: updateAdminTest
+      summary: Ubah pengaturan ujian course
+      x-required-role: admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                passing_grade: {type: integer, minimum: 0, maximum: 100}
+                maksimal_attempt: {type: integer, minimum: 1, maximum: 65535}
+                masa_tunggu_test_hari: {type: integer, minimum: 0, maximum: 65535}
+      responses:
+        '200': {description: Pengaturan tersimpan}
+        '400': {$ref: '#/components/responses/Error400'}
+        '403': {$ref: '#/components/responses/Error403'}
+  /api/admin/courses/{course_id}/test/questions:
+    parameters:
+    - {name: course_id, in: path, required: true, schema: {type: integer, minimum: 1}}
+    post:
+      tags: [Assessment]
+      operationId: createAdminQuestion
+      summary: Buat soal pilihan tunggal course
+      x-required-role: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminQuestionInput'}
+      responses:
+        '201': {description: Question dengan question_id/options dari database}
+        '400': {$ref: '#/components/responses/Error400'}
+        '403': {$ref: '#/components/responses/Error403'}
+  /api/admin/courses/{course_id}/test/questions/{question_id}:
+    parameters:
+    - {name: course_id, in: path, required: true, schema: {type: integer, minimum: 1}}
+    - {name: question_id, in: path, required: true, schema: {type: integer, minimum: 1}}
+    patch:
+      tags: [Assessment]
+      operationId: updateAdminQuestion
+      summary: Versi baru soal, simpan ID/opsi lama untuk attempt historis
+      x-required-role: admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/AdminQuestionInput'}
+      responses:
+        '200': {description: Question versi baru; ID sebelumnya tetap ada dengan status nonaktif}
+        '400': {$ref: '#/components/responses/Error400'}
+        '403': {$ref: '#/components/responses/Error403'}
+    delete:
+      tags: [Assessment]
+      operationId: deactivateAdminQuestion
+      summary: Nonaktifkan soal tanpa menghapus jawaban historis
+      x-required-role: admin
+      responses:
+        '200': {description: Question nonaktif}
+        '403': {$ref: '#/components/responses/Error403'}
   /:
     get:
       tags:
@@ -1713,6 +1868,16 @@ paths:
           - selesai_course
           - mulai_test
           - selesai_test
+          - logout
+          - sesi
+          - buka_dashboard
+          - putar_video
+          - kirim_komentar
+      - {name: search, in: query, description: Nama/email user atau judul course, schema: {type: string, maxLength: 200}}
+      - {name: user, in: query, description: Nama/email user, schema: {type: string, maxLength: 200}}
+      - {name: course, in: query, description: Judul course, schema: {type: string, maxLength: 200}}
+      - {name: date_from, in: query, description: Awal hari inklusif dalam WIB, schema: {type: string, format: date}}
+      - {name: date_to, in: query, description: Akhir hari inklusif dalam WIB, schema: {type: string, format: date}}
   /api/dashboard:
     get:
       tags:
@@ -3142,6 +3307,27 @@ components:
       required:
       - content
       additionalProperties: false
+    AdminQuestionInput:
+      type: object
+      additionalProperties: false
+      required: [pertanyaan, urutan, status, options]
+      properties:
+        pertanyaan: {type: string, minLength: 1, maxLength: 10000}
+        urutan: {type: integer, minimum: 1, maximum: 65535}
+        status: {type: string, enum: [aktif, nonaktif]}
+        options:
+          type: array
+          minItems: 2
+          maxItems: 6
+          description: Tepat satu is_correct=true, teks dan urutan harus berbeda
+          items:
+            type: object
+            additionalProperties: false
+            required: [text, urutan, is_correct]
+            properties:
+              text: {type: string, minLength: 1, maxLength: 255}
+              urutan: {type: integer, minimum: 1, maximum: 65535}
+              is_correct: {type: boolean}
     Activity:
       type: object
       properties:
@@ -3181,6 +3367,16 @@ components:
           - selesai_course
           - mulai_test
           - selesai_test
+          - logout
+          - sesi
+          - buka_dashboard
+          - putar_video
+          - kirim_komentar
+        user_name: {type: string}
+        course_title: {type: [string, 'null']}
+        material_title: {type: [string, 'null']}
+        time_basis: {type: [string, 'null'], description: UTC untuk event baru; null untuk legacy}
+        duration_status: {type: string, enum: [completed, confirmed_partial, recorded, unavailable]}
         durasi:
           anyOf:
           - type: integer
@@ -3190,13 +3386,13 @@ components:
         waktu_dimulai:
           anyOf:
           - type: string
-            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            description: Event baru UTC dengan Z; legacy tanpa zona dipertahankan.
             example: '2026-10-06T10:30:00'
           - type: 'null'
         waktu_selesai:
           anyOf:
           - type: string
-            description: Tanggal/waktu ISO 8601 tanpa timezone, mengikuti waktu server.
+            description: Batas waktu terakhir terkonfirmasi; untuk tracking selesai adalah waktu end. UTC dengan Z untuk event baru.
             example: '2026-10-06T10:30:00'
           - type: 'null'
       required:

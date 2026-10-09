@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from extensions import db
 from models.activity import Activity, ACTIVITY_TYPES
@@ -10,7 +10,7 @@ def record_activity(actor_id, kind, *, id_course=None, id_materi=None,
     """Stage an audit event in the caller's transaction, without commit.
 
     Trusted backend callers must validate domain ownership/permissions first.
-    No public write endpoint exists. Only schema-supported events are accepted.
+    API callers must validate actor/context; only schema-supported events are accepted.
     """
     if kind not in ACTIVITY_TYPES:
         raise ValueError("Jenis aktivitas belum didukung schema")
@@ -22,14 +22,14 @@ def record_activity(actor_id, kind, *, id_course=None, id_materi=None,
             raise ValueError(f"{name} harus berupa ID positif")
     if durasi is not None and (type(durasi) is not int or not 0 <= durasi <= 4294967295):
         raise ValueError("Durasi harus berupa detik nonnegatif")
-    start = waktu_dimulai if waktu_dimulai is not None else datetime.now()
+    start = waktu_dimulai if waktu_dimulai is not None else datetime.now(timezone.utc).replace(tzinfo=None)
     if not isinstance(start, datetime) or start.tzinfo is not None:
-        raise ValueError("Waktu harus datetime lokal tanpa timezone, sesuai schema existing")
+        raise ValueError("Waktu event baru harus datetime UTC tanpa tzinfo, sesuai kolom database")
     if waktu_selesai is not None:
         if not isinstance(waktu_selesai, datetime) or waktu_selesai.tzinfo is not None or waktu_selesai < start:
             raise ValueError("Waktu selesai tidak valid")
     event = Activity(id_user=actor_id, jenis_aktivitas=kind, id_course=id_course,
                      id_materi=id_materi, id_penilaian=id_penilaian, durasi=durasi,
-                     waktu_dimulai=start, waktu_selesai=waktu_selesai)
+                     waktu_dimulai=start, waktu_selesai=waktu_selesai, time_basis='UTC')
     db.session.add(event)
     return event

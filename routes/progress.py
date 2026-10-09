@@ -1,4 +1,3 @@
-from datetime import datetime
 from flask import Blueprint, request
 from sqlalchemy.exc import IntegrityError, OperationalError
 from extensions import db
@@ -6,6 +5,8 @@ from models import Course, Materi, UserCourse, UserMateri
 from routes.auth import token_required
 from routes.materi import course_visible
 from services.learning_progress import course_progress, sync_enrollment
+from services.activity import record_activity
+from models.learning import utcnow
 
 
 progress_bp = Blueprint("progress", __name__, url_prefix="/api/me")
@@ -92,7 +93,8 @@ def update_progress(user, id_materi):
         if item is None:
             item = UserMateri(id_user=user.id_user, id_materi=id_materi, materi=materi, status="belum_mulai")
             db.session.add(item)
-        now = datetime.now()
+        now = utcnow()
+        previous_status = item.status
         status = values.get("status", item.status)
         if status == "belum_mulai":
             item.waktu_mulai = None
@@ -111,6 +113,8 @@ def update_progress(user, id_materi):
         db.session.flush()
         summary = course_progress(user.id_user, materi.id_course, lock=True)
         sync_enrollment(enrollment, summary, now)
+        if status == 'selesai' and previous_status != 'selesai':
+            record_activity(user.id_user, 'selesai_materi', id_course=materi.id_course, id_materi=id_materi)
         db.session.commit()
     except (IntegrityError, OperationalError) as error:
         return progress_error(error)

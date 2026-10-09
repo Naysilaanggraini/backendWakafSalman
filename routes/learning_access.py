@@ -1,7 +1,7 @@
 from werkzeug.exceptions import HTTPException
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from extensions import db
-from models import Course, Enrollment, Material, Question
+from models import Course, Enrollment, Material, Question, TestAttempt
 
 
 class LearningError(Exception):
@@ -25,6 +25,11 @@ def install_errors(bp):
         db.session.rollback()
         return {"message": error.description}, error.code
 
+    @bp.errorhandler(SQLAlchemyError)
+    def unavailable(error):
+        db.session.rollback()
+        return {'message': 'Database belum dapat memproses request. Periksa layanan dan migrasi.'}, 503
+
 
 def payload(allowed, required=()):
     from flask import request
@@ -42,7 +47,7 @@ def course_access(user, course_id, lock=False):
     course = db.session.get(Course, course_id)
     if not course:
         raise LearningError("Course tidak ditemukan", 404)
-    if course.status != "aktif":
+    if course.status != "aktif" or not course.kategori or course.kategori.status != "aktif":
         raise LearningError("Course tidak dapat diakses", 403)
     query = db.select(Enrollment).where(Enrollment.id_user == user.id_user, Enrollment.id_course == course_id)
     if lock:
@@ -67,5 +72,7 @@ def discussion_context(user, context_type, context_id):
     course_access(user, course_id)
     if context_type == "test" and not db.session.execute(db.select(Question.id_soal).where(
         Question.id_course == course_id, Question.status == "aktif").limit(1)).first():
-        raise LearningError("Test tidak ditemukan", 404)
+        if not db.session.execute(db.select(TestAttempt.id_penilaian).where(
+            TestAttempt.id_course == course_id, TestAttempt.id_user == user.id_user).limit(1)).first():
+            raise LearningError("Test tidak ditemukan", 404)
     return course_id, material.id_materi if material else None

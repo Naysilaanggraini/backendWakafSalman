@@ -2,6 +2,37 @@
 
 Backend Flask untuk authentication, profil/foto profil, pengelolaan akun, serta Test & Discussion LMS Wakaf Salman. Folder ini disiapkan sebagai root repository backend terpisah. Frontend React/Vite tetap berada pada repository frontend.
 
+## Integrasi LMS — pembaruan 9 Oktober 2026
+
+Catatan developer di bagian bawah mencatat kondisi sebelum audit ini. Kontrak terkini ada di `openapi.yaml`.
+
+- Admin Test sekarang menggunakan `/api/admin/courses/:id/test` (GET/PATCH), `/questions` (POST), dan `/questions/:id` (PATCH/DELETE) pada tabel `soal`/`pilihan_soal` yang sama dengan User. Edit membuat versi baru dan menonaktifkan versi lama agar jawaban/snapshot historis tetap valid. Tidak ada soal atau jawaban runtime yang di-hardcode. Default passing grade tetap 70.
+- GET test mengembalikan metadata dan `questions: []` untuk course yang belum mempunyai soal, bukan error 404. Enrollment, materi aktif, cooldown, dan batas attempt tetap divalidasi backend.
+- Perpindahan playlist menunggu transaksi progress materi sebelumnya sebelum membuka progress materi berikutnya. Ini mencegah materi baru terkunci ketika pengguna cepat berpindah setelah menekan Mark as complete.
+- Admin Discussion: GET `/api/admin/discussions` dengan `search`, `course_id`, `page`, `per_page`; PATCH `/api/admin/discussions/:id` dengan status `tampil`/`disembunyikan`. Parent tersembunyi menyembunyikan subtree. User tetap hanya dapat edit/delete komentar sendiri. Halaman belajar menampilkan satu diskusi sesuai materi aktif; layout playlist, About Course, dan Leaderboard dipertahankan.
+- GET `/api/activity` mengembalikan nama user serta judul course/materi melalui relasi, dengan filter gabungan `search`, `user`, `course`, `date_from`, `date_to` selain filter/pagination lama. Batas tanggal inklusif dalam WIB; SQL memakai akhir eksklusif hari berikutnya. Filter berlaku sebelum pagination, pencarian wildcard di-escape.
+- POST `/api/me/activity`: UUID `request_id`, `kind`, `action` (`active`/`pause`/`end`), dan konteks course/materi sesuai jenis. Actor diambil dari JWT. Server memvalidasi enrollment dan relasi, menghitung interval timestamp server, serta memakai lock user dan lease per jenis agar beberapa tab tidak menambah durasi ganda. UUID menghindari event ganda pada retry.
+- Durasi disimpan dalam detik. `sesi` adalah waktu aktif website, bukan seluruh waktu sejak login. Frontend heartbeat setiap 15 detik, berhenti menambah waktu ketika tab tersembunyi atau tidak ada interaksi 60 detik. Playback aktif memakai event player, bukan klik/route saja. Gap server di atas 45 detik tidak dikreditkan. Refresh/perpindahan halaman menutup segmen; penutupan mendadak menyisakan durasi parsial terkonfirmasi tanpa mengarang waktu akhir. Jangan menjumlahkan durasi sesi/course/materi/video: konteks tersebut dapat bertumpang tindih.
+- Login baru membawa ID event login dalam JWT (bukan token dalam log). Heartbeat sesi menambahkan waktu aktif ke event login tersebut. POST `/api/auth/logout` menerima UUID, menutup tracking untuk sesi login tersebut, mencatat logout secara idempotent, dan menolak JWT sesi tersebut pada request berikutnya. Token legacy tanpa ID event tetap mengikuti expiry lama; autentikasi/role existing dipertahankan.
+- Penyelesaian materi, komentar, start/submit test, dan kelulusan course dicatat di transaksi backend yang sama dengan perubahan domain. Resume attempt, submit ulang, dan completion ulang tidak membuat event sukses baru.
+- Migrasi `0003_activity_tracking` menambahkan enum event, kolom nullable `activity.time_basis`, dan tabel `activity_tracking`; tidak mengubah waktu/durasi log lama. `time_basis=UTC` hanya untuk event baru, legacy tetap tanpa zona. Filter legacy memakai konvensi WIB aplikasi.
+
+Backend Python/Flask/SQLAlchemy/MariaDB tetap digunakan. Frontend React/Vite/Zustand menggunakan axios dan JWT existing; `VITE_API_BASE_URL` opsional, default tetap `http://localhost:5000/api`. Referensi Figma tidak ditemukan pada source atau prompt; shell/style existing digunakan untuk perubahan fungsional ini.
+
+Pengujian terisolasi lintas-role: `venv/Scripts/python.exe -m unittest discover -s tests -v`. Browser/MariaDB QA memakai **database baru dengan nama unik**, akun dan konten khusus pengujian, tanpa mock API atau menulis fixture ke database aplikasi:
+
+```powershell
+# Dari repository frontend; gunakan layanan MariaDB lokal yang dapat CREATE DATABASE.
+$env:RUN_LMS_ISOLATED_QA='1'
+node tests/lms-browser.mjs
+```
+
+Runner membuat migrasi dari kosong, menjalankan API sementara port 5001/frontend 5174/browser profile terpisah, dan mematikan proses pengujian saat selesai. Database QA dibiarkan tersedia untuk inspeksi; tidak otomatis DROP. Browser runner memerlukan Chrome pada path Windows yang tertera di file test. `tests/qa_lms_server.py` menolak melayani QA terhadap database aplikasi. Fixtures pengujian tidak menjadi fallback frontend.
+
+Untuk database legacy yang **persis** baseline dan belum mempunyai riwayat Alembic, `tests/adopt_local_baseline.py` menyediakan opt-in `RUN_VERIFIED_LOCAL_UPGRADE=1`: membandingkan seluruh tabel/kolom/index/FK/CHECK dengan database referensi terpisah, membuat backup schema/data lokal, baru stamp baseline dan upgrade. Jika schema berbeda, berhenti tanpa stamp/upgrade. DDL MariaDB tidak transactional; jika upgrade parsial, periksa kondisi dan backup sebelum tindakan lain. Database yang sudah versioned cukup memakai `flask --app app db upgrade`.
+
+Leaderboard masih 501 menunggu kebijakan ranking existing; tidak diganti data dummy. Pengukuran YouTube memakai IFrame Player API; jika API/provider gagal, tampilkan error dan jangan mengklaim durasi pemutaran. Durasi tab/crash hanya mencakup interval terakhir yang terkonfirmasi, dengan `duration_status=confirmed_partial` pada reporting.
+
 ## Production, Docker, dan migrasi
 
 Panduan lengkap: [docs/PRODUCTION.md](docs/PRODUCTION.md).
