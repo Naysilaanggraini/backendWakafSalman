@@ -1,6 +1,6 @@
 """Real ORM transactions against disposable SQLite memory only, never .env DB.
 
-Explicit fixture DDL is not a migration; no create_all or domain tables.
+Explicit fixture DDL and create_all are restricted to SQLite memory only.
 MariaDB enum/FK/locking behavior still requires a separate integration check.
 """
 import unittest
@@ -48,6 +48,9 @@ class IdentityReportingTests(unittest.TestCase):
             "CREATE TABLE activity (id_activity INTEGER PRIMARY KEY, id_user INTEGER NOT NULL REFERENCES users(id_user), id_course INTEGER, id_materi INTEGER, id_penilaian INTEGER, jenis_aktivitas VARCHAR(30) NOT NULL, durasi INTEGER, waktu_dimulai DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL, waktu_selesai DATETIME)",
         ):
             db.session.execute(text(statement))
+        db.session.execute(text('ALTER TABLE activity ADD COLUMN time_basis VARCHAR(10)'))
+        # Reporting now joins real course/material relations; create missing fixture tables.
+        db.create_all()
         password_hash = generate_password_hash("test-password")
         db.session.add_all([
             User(id_user=1, nama="Admin", email="admin@example.test", password=password_hash, role="admin", status="aktif"),

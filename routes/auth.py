@@ -1,4 +1,4 @@
-from flask import Blueprint, request, current_app, send_from_directory, abort
+from flask import Blueprint, request, current_app, send_from_directory, abort, g
 import re
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -8,7 +8,7 @@ from functools import wraps
 import jwt
 
 from extensions import db
-from models import User
+from models import User, Activity, ActivityTracking
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from services.activity import record_activity
 from services.profile import apply_phone
@@ -76,6 +76,20 @@ def token_required(f):
                 "message": "Token tidak valid"
             }, 401
 
+        g.login_activity_id = payload.get('login_activity_id')
+        if g.login_activity_id is not None:
+            if type(g.login_activity_id) is not int or g.login_activity_id <= 0:
+                return {'message': 'Sesi login tidak valid'}, 401
+            login_event = db.session.get(Activity, g.login_activity_id)
+            if not login_event or login_event.id_user != user.id_user or login_event.jenis_aktivitas != 'login':
+                return {'message': 'Sesi login tidak valid'}, 401
+            if request.endpoint != 'logout.logout':
+                ended = db.session.execute(db.select(ActivityTracking.id_activity).join(
+                    Activity, Activity.id_activity == ActivityTracking.id_activity).where(
+                    ActivityTracking.id_login_activity == g.login_activity_id,
+                    Activity.jenis_aktivitas == 'logout').limit(1)).first()
+                if ended:
+                    return {'message': 'Sesi sudah logout. Silakan login kembali.'}, 401
         return f(user, *args, **kwargs)
 
     return decorated
@@ -187,7 +201,7 @@ def login():
             "message": "Email atau password salah"
         }, 401
 
-    user.terakhir_login = datetime.now()
+    user.terakhir_login = datetime.now(timezone.utc).replace(tzinfo=None)
 
     payload = {
         "id_user": user.id_user,
@@ -195,14 +209,12 @@ def login():
         "exp": datetime.now(timezone.utc) + timedelta(hours=8)
     }
 
-    token = jwt.encode(
-        payload,
-        current_app.config["JWT_SECRET_KEY"],
-        algorithm="HS256"
-    )
-
-    record_activity(user.id_user, "login", waktu_dimulai=user.terakhir_login)
     try:
+        event = record_activity(user.id_user, "login", waktu_dimulai=user.terakhir_login)
+        db.session.flush()
+        if type(event.id_activity) is int:
+            payload['login_activity_id'] = event.id_activity
+        token = jwt.encode(payload, current_app.config['JWT_SECRET_KEY'], algorithm='HS256')
         db.session.commit()
     except SQLAlchemyError:
         db.session.rollback()

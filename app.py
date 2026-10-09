@@ -18,6 +18,9 @@ from routes.tests import tests_bp
 from routes.admin_tests import admin_tests_bp
 from routes.discussions import discussions_bp
 from routes.reporting import reporting_bp
+from routes.admin_assessment import admin_assessment_bp
+from routes.activity_tracking import tracking_bp
+from routes.logout import logout_bp
 
 def create_app(test_config=None):
     app = Flask(__name__)
@@ -50,6 +53,9 @@ def create_app(test_config=None):
     app.register_blueprint(admin_tests_bp)
     app.register_blueprint(discussions_bp)
     app.register_blueprint(reporting_bp)
+    app.register_blueprint(admin_assessment_bp)
+    app.register_blueprint(tracking_bp)
+    app.register_blueprint(logout_bp)
 
     @app.route("/")
     def home():

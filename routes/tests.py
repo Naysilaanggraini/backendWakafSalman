@@ -6,6 +6,7 @@ from models import Material, MaterialProgress, Question, Option, TestAttempt, Us
 from models.learning import utcnow
 from routes.auth import token_required
 from routes.learning_access import LearningError, course_access, install_errors, payload, positive_id
+from services.activity import record_activity
 
 
 tests_bp = Blueprint("tests", __name__, url_prefix="/api")
@@ -110,8 +111,6 @@ def get_test(user, course_id):
         TestAttempt.id_course == course_id).order_by(TestAttempt.test_attempt.desc())).scalars().all()
     active = next((a for a in attempts if a.status_attempt == "in_progress"), None)
     latest = next((a for a in attempts if a.status_attempt == "completed"), None)
-    if not questions and not active and not latest:
-        raise LearningError("Test tidak ditemukan", 404)
     completed = ready(course, enrollment)
     allowed, reason = access_decision(course, enrollment, attempts, active, questions, completed)
     return {"course_id": course_id, "test_id": course_id, "passing_score": active.passing_grade if active else course.passing_grade,
@@ -174,6 +173,9 @@ def start_test(user, course_id):
         question_snapshot=snapshot, passing_grade=course.passing_grade)
     enrollment.status_test = "aktif"
     db.session.add(attempt)
+    db.session.flush()
+    record_activity(user.id_user, 'mulai_test', id_course=course_id,
+                    id_penilaian=attempt.id_penilaian, waktu_dimulai=attempt.waktu_mulai)
     db.session.commit()
     return {"attempt": attempt_data(attempt), "questions": public_questions(snapshot)}, 201
 
@@ -261,6 +263,11 @@ def submit_test(user, attempt_id):
     else:
         enrollment.status_test = "aktif"
         enrollment.test_dapat_diakses_lagi = None
+    record_activity(user.id_user, 'selesai_test', id_course=attempt.id_course,
+                    id_penilaian=attempt.id_penilaian, durasi=attempt.durasi,
+                    waktu_dimulai=attempt.waktu_mulai, waktu_selesai=attempt.waktu_selesai)
+    if passed:
+        record_activity(user.id_user, 'selesai_course', id_course=attempt.id_course)
     db.session.commit()
     return result_data(attempt), 200
 

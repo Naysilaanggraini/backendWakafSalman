@@ -51,8 +51,8 @@ class MigrationTests(unittest.TestCase):
         self.cli("upgrade")
         self.cli("upgrade")
         with self.engine.connect() as connection:
-            self.assertEqual(connection.execute(text("SELECT version_num FROM alembic_version")).scalar(), "0002_assessment")
-            self.assertEqual(len(inspect(connection).get_table_names()), 14)
+            self.assertEqual(connection.execute(text("SELECT version_num FROM alembic_version")).scalar(), "0003_activity_tracking")
+            self.assertEqual(len(inspect(connection).get_table_names()), 15)
             columns = {c["name"] for c in inspect(connection).get_columns("penilaian")}
             self.assertTrue({"status_attempt", "question_snapshot", "passing_grade"} <= columns)
         result = self.cli("downgrade", "0001_baseline", succeeds=False)
@@ -84,7 +84,7 @@ class MigrationTests(unittest.TestCase):
         self.cli("stamp", "0002_assessment")
         self.cli("upgrade")
         with self.engine.connect() as connection:
-            self.assertEqual(connection.execute(text("SELECT version_num FROM alembic_version")).scalar(), "0002_assessment")
+            self.assertEqual(connection.execute(text("SELECT version_num FROM alembic_version")).scalar(), "0003_activity_tracking")
 
     def test_partial_manual_migration_is_rejected(self):
         self.sql_file("schema.sql")

@@ -19,9 +19,9 @@ class ProgressApiTests(LearningApiCase):
         self.records[UserMateri] = self.progress
         self.session.execute.side_effect = self.query
         self.now = datetime(2026, 10, 5, 12, 30)
-        self.clock = patch("routes.progress.datetime")
+        self.clock = patch("routes.progress.utcnow")
         clock = self.clock.start()
-        clock.now.return_value = self.now
+        clock.return_value = self.now
         self.addCleanup(self.clock.stop)
 
     def query(self, query):
@@ -94,11 +94,13 @@ class ProgressApiTests(LearningApiCase):
         self.update(2, status="selesai")
         completed = self.enrollment.tanggal_selesai
         self.now = datetime(2026, 10, 6)
-        with patch("routes.progress.datetime") as clock:
-            clock.now.return_value = self.now
+        with patch("routes.progress.utcnow") as clock:
+            clock.return_value = self.now
             response = self.update(status="selesai")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.session.add.call_count, 2)
+        self.assertEqual(len(self.records[UserMateri]), 3)  # two actor records + one other user
+        from models import Activity
+        self.assertEqual(len(self.records[Activity]), 2)  # repeated completion emits no duplicate
         self.assertEqual(self.own_progress().waktu_selesai, completed)
         self.assertEqual(self.enrollment.tanggal_selesai, completed)
 

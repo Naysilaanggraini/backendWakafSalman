@@ -223,7 +223,9 @@ class LearningApiTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/test-attempts/999", headers=self.headers()).status_code, 404)
         db.session.add(Enrollment(id_user=1, id_course=2))
         db.session.commit()
-        self.assertEqual(self.client.get("/api/courses/2/test", headers=self.headers()).status_code, 404)
+        empty = self.client.get("/api/courses/2/test", headers=self.headers())
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json['questions'], [])
         self.assertEqual(self.client.get("/api/discussions/test/2", headers=self.headers()).status_code, 404)
         for data in (None, [], {"user_id": 2}, {"score": 100}):
             self.assertEqual(self.client.post("/api/courses/1/test-attempts", headers=self.headers(), json=data).status_code, 400)

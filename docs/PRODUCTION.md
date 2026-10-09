@@ -73,6 +73,7 @@ Riwayat Alembic tersimpan di `alembic_version`:
 |---|---|
 | `0001_baseline` | Snapshot immutable 13 tabel dari `schema.sql` |
 | `0002_assessment` | Perubahan additive dari `001_test_discussion.sql` |
+| `0003_activity_tracking` | Enum aktivitas tambahan, penanda UTC event baru, dan tabel heartbeat dengan FK activity/login |
 
 Migrasi memakai advisory lock per database sehingga dua proses migrasi tidak
 berjalan bersamaan. **DDL MariaDB tidak transactional**: jika gagal di tengah,
