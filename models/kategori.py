@@ -1,5 +1,5 @@
 from extensions import db
-from sqlalchemy.dialects.mysql import INTEGER
+from sqlalchemy.dialects.mysql import INTEGER, MEDIUMTEXT
 
 
 class Kategori(db.Model):
@@ -8,7 +8,7 @@ class Kategori(db.Model):
 
     id_kategori = db.Column(INTEGER(unsigned=True), primary_key=True, autoincrement=True)
     nama_kategori = db.Column(db.String(100), nullable=False)
-    thumbnail = db.Column(db.String(255), nullable=True)
+    thumbnail = db.Column(db.Text().with_variant(MEDIUMTEXT(), 'mysql'), nullable=True)
     status = db.Column(db.Enum("aktif", "nonaktif"), nullable=False, server_default="aktif")
     tanggal_dibuat = db.Column(db.TIMESTAMP, nullable=False, server_default=db.func.current_timestamp())
     tanggal_diperbarui = db.Column(

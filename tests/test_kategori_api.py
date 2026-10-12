@@ -1,4 +1,4 @@
-﻿"""Kategori API contract tests with mocked database sessions."""
+"""Kategori API contract tests with mocked database sessions."""
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -124,7 +124,7 @@ class KategoriApiTests(unittest.TestCase):
         invalid = [{}, [], "text", {"nama_kategori": " "}, {"nama_kategori": None},
                    {"nama_kategori": 12}, {"nama_kategori": "x" * 101},
                    {"status": "invalid"}, {"status": None}, {"thumbnail": 123},
-                   {"thumbnail": "x" * 256}, {"id_kategori": 9},
+                   {"thumbnail": "x" * 700001}, {"id_kategori": 9},
                    {"tanggal_dibuat": "2026-01-01"}, {"tanggal_diperbarui": "2026-01-01"}]
         for method, path in [("post", "/api/kategori"), ("patch", "/api/kategori/1")]:
             for data in invalid:
@@ -174,7 +174,7 @@ class KategoriApiTests(unittest.TestCase):
         self.assertEqual(table.c.id_kategori.type.compile(dialect=mysql.dialect()), "INTEGER UNSIGNED")
         self.assertTrue(any(constraint.name == "uq_kategori_nama" for constraint in table.constraints))
         self.assertEqual(table.c.nama_kategori.type.length, 100)
-        self.assertEqual(table.c.thumbnail.type.length, 255)
+        self.assertEqual(table.c.thumbnail.type.compile(dialect=mysql.dialect()), "MEDIUMTEXT")
         self.assertEqual(table.c.status.type.enums, ["aktif", "nonaktif"])
         self.assertIsNotNone(table.c.tanggal_diperbarui.server_onupdate)
 

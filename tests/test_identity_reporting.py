@@ -72,6 +72,26 @@ class IdentityReportingTests(unittest.TestCase):
         self.assertTrue(check_password_hash(user.password, "test-password"))
         self.assertEqual(self.client.post("/api/auth/register", json=body).status_code, 409)
 
+    def test_session_duration_uses_authenticated_login(self):
+        from routes.logout import logout_bp
+        from uuid import uuid4
+        self.app.register_blueprint(logout_bp)
+        started = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=125)
+        event = record_activity(2, 'login', waktu_dimulai=started)
+        db.session.commit()
+        headers = self.headers(2, login_activity_id=event.id_activity)
+        response = self.client.get('/api/auth/session', headers=headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(response.json['duration_seconds'], 125)
+        self.assertLess(response.json['duration_seconds'], 130)
+        self.assertEqual(self.client.get('/api/auth/session', headers=self.headers(1, login_activity_id=event.id_activity)).status_code, 401)
+        self.assertEqual(self.client.get('/api/auth/session', headers=self.headers(2)).status_code, 409)
+        result = self.client.post('/api/auth/logout', headers=headers, json={'request_id': str(uuid4())})
+        self.assertEqual(result.status_code, 200)
+        logged_out = db.session.execute(db.select(Activity).where(Activity.jenis_aktivitas == 'logout')).scalar_one()
+        self.assertGreaterEqual(logged_out.durasi, 125)
+        self.assertEqual(self.client.get('/api/auth/session', headers=headers).status_code, 401)
+
     def test_invalid_auth_inputs(self):
         for endpoint in ("register", "login"):
             for body in ([], "bad", {"email": 123, "password": []}, {}):
@@ -138,12 +158,13 @@ class IdentityReportingTests(unittest.TestCase):
             self.assertEqual(self.client.get(path, headers=self.headers(3)).status_code, 403)
         response = self.client.get("/api/dashboard", headers=self.headers())
         self.assertEqual(response.json["identity"], {"total_users": 3, "active_users": 2, "inactive_users": 1, "admins": 1, "regular_users": 2})
-        self.assertIsNone(response.json["learning"])
+        self.assertEqual(response.json['learning']['total_courses'], 0)
+        self.assertEqual(response.json['learning']['completion_rate'], 0)
         self.assertIsNone(response.json["assessment"])
         self.assertEqual(self.client.get("/api/leaderboard").status_code, 401)
         response = self.client.get("/api/leaderboard", headers=self.headers(2))
-        self.assertEqual(response.status_code, 501)
-        self.assertNotIn("rankings", response.json)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['rankings'], [])
 
     def test_activity_filter_pagination_and_rollback(self):
         record_activity(2, "login")

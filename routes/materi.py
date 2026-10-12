@@ -1,10 +1,64 @@
-from flask import Blueprint, request
+from flask import Blueprint, request, current_app, url_for, send_from_directory
+from pathlib import Path
+from uuid import uuid4
+import re
 from sqlalchemy.exc import IntegrityError
 from extensions import db
-from models import Course, Materi
+from models import Course, Materi, Kategori
 from routes.auth import token_required, admin_required
 
 materi_bp = Blueprint("materi", __name__, url_prefix="/api")
+
+PDF_LIMIT = 10 * 1024 * 1024
+
+
+def pdf_directory():
+    return Path(current_app.config.get('MATERIAL_PDF_DIR', Path(current_app.instance_path) / 'materials'))
+
+
+@materi_bp.post('/course/<int:id_course>/materi/pdf')
+@token_required
+@admin_required
+def upload_pdf(user, id_course):
+    if db.session.get(Course, id_course) is None:
+        return {'message': 'Course tidak ditemukan'}, 404
+    request.max_content_length = PDF_LIMIT + 1024 * 1024
+    uploaded = request.files.get('file')
+    if uploaded is None or not uploaded.filename or not uploaded.filename.lower().endswith('.pdf'):
+        return {'message': 'Pilih file PDF yang valid'}, 400
+    contents = uploaded.stream.read(PDF_LIMIT + 1)
+    if len(contents) > PDF_LIMIT:
+        return {'message': 'Ukuran PDF maksimal 10 MB'}, 413
+    if not contents.startswith(b'%PDF-') or b'%%EOF' not in contents[-4096:]:
+        return {'message': 'Isi file bukan dokumen PDF yang valid'}, 400
+    filename = f'{uuid4().hex}.pdf'
+    link = url_for('materi.download_pdf', filename=filename, _external=True)
+    if len(link) > 500:
+        return {'message': 'Alamat server terlalu panjang untuk tautan materi'}, 400
+    try:
+        directory = pdf_directory()
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / filename).write_bytes(contents)
+    except OSError:
+        return {'message': 'PDF belum dapat disimpan. Periksa penyimpanan server.'}, 503
+    return {'message': 'PDF berhasil diupload', 'url': link}, 201
+
+
+@materi_bp.get('/files/materials/<filename>')
+def download_pdf(filename):
+    if not re.fullmatch(r'[0-9a-f]{32}\.pdf', filename):
+        return {'message': 'PDF tidak ditemukan'}, 404
+    # Only publish files attached to an active material in an active catalog.
+    item = db.session.execute(db.select(Materi.id_materi).join(Course).join(Kategori)
+        .where(Materi.jenis_file == 'pdf', Materi.status == 'aktif', Course.status == 'aktif',
+               Kategori.status == 'aktif', Materi.tautan_file.endswith('/api/files/materials/' + filename))
+        .limit(1)).first()
+    if item is None:
+        return {'message': 'PDF tidak ditemukan'}, 404
+    response = send_from_directory(pdf_directory(), filename, mimetype='application/pdf', conditional=True)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Cache-Control'] = 'no-store'
+    return response
 
 
 def validate_materi_data(data, *, create=False):

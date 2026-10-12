@@ -49,6 +49,9 @@ def logout(user):
         track.activity.durasi = track.credited_ms // 1000
         track.running, track.finished = False, True
     event = record_activity(user.id_user, 'logout', waktu_dimulai=now)
+    if login_id:
+        login = db.session.get(Activity, login_id)
+        event.durasi = max(0, int((now - login.waktu_dimulai).total_seconds()))
     db.session.flush()
     db.session.add(ActivityTracking(activity=event, request_id=key, last_seen=now,
                                    running=False, finished=True, credited_ms=0,

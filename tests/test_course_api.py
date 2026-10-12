@@ -1,4 +1,4 @@
-﻿"""Course API contracts with mocked sessions; no database writes."""
+"""Course API contracts with mocked sessions; no database writes."""
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -143,7 +143,7 @@ class CourseApiTests(unittest.TestCase):
     def test_invalid_inputs_and_protected_fields(self):
         invalid = [{}, [], "text", {"judul_course": " "}, {"judul_course": None},
             {"judul_course": 7}, {"judul_course": "x" * 151}, {"credit": "x" * 151},
-            {"thumbnail": "x" * 501}, {"deskripsi": 1}, {"key_point": []}, {"status": "invalid"},
+            {"thumbnail": "x" * 700001}, {"deskripsi": 1}, {"key_point": []}, {"status": "invalid"},
             {"status": None}, {"deskripsi": "x" * 65536}, {"key_point": "界" * 21846}]
         invalid += [{"id_kategori": value} for value in (0, -1, True, 1.5, "1", None, 4294967296)]
         invalid += [{key: 1} for key in ("id_course", "tanggal_dibuat", "tanggal_diperbarui", "passing_grade",

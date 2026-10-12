@@ -1,9 +1,12 @@
 ﻿from flask import Blueprint, request
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 
 from extensions import db
-from models import Course, Kategori
+from models import Course, Kategori, UserCourse, User
 from routes.auth import token_required, admin_required
+from services.thumbnail import thumbnail_error
 
 
 course_bp = Blueprint("course", __name__, url_prefix="/api/course")
@@ -16,7 +19,7 @@ def validate_course_data(data, *, create=False):
     if set(data) - allowed:
         return None, "Ada field yang tidak dapat diubah"
     values = {}
-    limits = {"judul_course": 150, "credit": 150, "thumbnail": 500}
+    limits = {"judul_course": 150, "credit": 150}
     for key, value in data.items():
         if key == "id_kategori":
             if type(value) is not int or not 1 <= value <= 4294967295:
@@ -27,6 +30,10 @@ def validate_course_data(data, *, create=False):
             if not isinstance(value, str):
                 return None, f"{key} harus berupa teks"
             value = value.strip()
+            if key == 'thumbnail':
+                error = thumbnail_error(value)
+                if error:
+                    return None, error
             if key == "judul_course" and not value:
                 return None, "judul_course wajib diisi"
             if key in limits and len(value) > limits[key]:
@@ -56,10 +63,26 @@ def integrity_response(error):
     raise error
 
 
+@course_bp.route("/public", methods=["GET"])
+def public_courses():
+    participants = db.select(UserCourse.id_course.label('course_id'),
+        func.count(func.distinct(UserCourse.id_user)).label('total'))\
+        .join(User, User.id_user == UserCourse.id_user).where(User.role == 'user')\
+        .group_by(UserCourse.id_course).subquery()
+    rows = db.session.execute(db.select(Course, Kategori.nama_kategori)
+        .join(Kategori, Course.id_kategori == Kategori.id_kategori)
+        .outerjoin(participants, participants.c.course_id == Course.id_course)
+        .where(Course.status == 'aktif', Kategori.status == 'aktif')
+        .order_by(func.coalesce(participants.c.total, 0).desc(), Course.id_course.desc()).limit(6)).all()
+    return {'course': [{'id': course.id_course, 'judul': course.judul_course,
+                       'thumbnail': course.thumbnail, 'category': category}
+                      for course, category in rows]}, 200
+
+
 @course_bp.route("", methods=["GET"])
 @token_required
 def list_course(user):
-    query = db.select(Course).order_by(Course.id_course.desc())
+    query = db.select(Course).options(selectinload(Course.materi)).order_by(Course.id_course.desc())
     if user.role != "admin":
         query = query.where(Course.status == "aktif", Course.kategori.has(Kategori.status == "aktif"))
     items = db.session.execute(query).scalars().all()

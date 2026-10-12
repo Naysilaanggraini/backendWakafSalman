@@ -1,5 +1,5 @@
 from extensions import db
-from sqlalchemy.dialects.mysql import INTEGER, SMALLINT, TINYINT
+from sqlalchemy.dialects.mysql import INTEGER, SMALLINT, TINYINT, MEDIUMTEXT
 
 
 class Course(db.Model):
@@ -13,7 +13,7 @@ class Course(db.Model):
         "kategori.id_kategori", name="fk_course_kategori", onupdate="CASCADE"), nullable=False)
     key_point = db.Column(db.Text, nullable=True)
     credit = db.Column(db.String(150), nullable=True)
-    thumbnail = db.Column(db.String(500), nullable=True)
+    thumbnail = db.Column(db.Text().with_variant(MEDIUMTEXT(), 'mysql'), nullable=True)
     # Existing schema fields; managed by the assessment developer, not this API.
     passing_grade = db.Column(TINYINT(unsigned=True).with_variant(db.SmallInteger(), "sqlite"), nullable=False, server_default="70")
     maksimal_attempt = db.Column(SMALLINT(unsigned=True), nullable=False, server_default="3")
@@ -36,6 +36,7 @@ class Course(db.Model):
             "key_point": self.key_point,
             "credit": self.credit,
             "thumbnail": self.thumbnail,
+            "jumlah_materi": len(self.materi),
             "status": self.status,
             "tanggal_dibuat": self.tanggal_dibuat.isoformat() if self.tanggal_dibuat else None,
             "tanggal_diperbarui": self.tanggal_diperbarui.isoformat() if self.tanggal_diperbarui else None,

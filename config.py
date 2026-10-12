@@ -43,4 +43,6 @@ def load_config():
     }
     if os.getenv("PROFILE_PHOTO_DIR"):
         config["PROFILE_PHOTO_DIR"] = str(Path(os.environ["PROFILE_PHOTO_DIR"]).resolve())
+    if os.getenv("MATERIAL_PDF_DIR"):
+        config["MATERIAL_PDF_DIR"] = str(Path(os.environ["MATERIAL_PDF_DIR"]).resolve())
     return config

@@ -236,6 +236,17 @@ def login():
 # GET CURRENT USER
 # =========================================================
 
+@auth_bp.get('/session')
+@token_required
+def current_session(user):
+    login_id = getattr(g, 'login_activity_id', None)
+    login = db.session.get(Activity, login_id) if login_id else None
+    if not login:
+        return {'message': 'Silakan login kembali untuk melihat durasi sesi.'}, 409
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return {'duration_seconds': max(0, int((now - login.waktu_dimulai).total_seconds()))}
+
+
 @auth_bp.route("/me", methods=["GET"])
 @token_required
 def me(user):

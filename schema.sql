@@ -6,7 +6,7 @@
 CREATE TABLE `kategori` (
   `id_kategori` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `nama_kategori` varchar(100) NOT NULL,
-  `thumbnail` varchar(255) DEFAULT NULL,
+  `thumbnail` mediumtext DEFAULT NULL,
   `status` enum('aktif','nonaktif') NOT NULL DEFAULT 'aktif',
   `tanggal_dibuat` timestamp NOT NULL DEFAULT current_timestamp(),
   `tanggal_diperbarui` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
@@ -37,7 +37,7 @@ CREATE TABLE `course` (
   `id_kategori` int(10) unsigned NOT NULL,
   `key_point` text DEFAULT NULL,
   `credit` varchar(150) DEFAULT NULL,
-  `thumbnail` varchar(500) DEFAULT NULL,
+  `thumbnail` mediumtext DEFAULT NULL,
   `passing_grade` tinyint(3) unsigned NOT NULL DEFAULT 70,
   `maksimal_attempt` smallint(5) unsigned NOT NULL DEFAULT 3,
   `masa_tunggu_test_hari` smallint(5) unsigned NOT NULL DEFAULT 7,

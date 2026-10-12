@@ -62,6 +62,75 @@ class LearningApiTests(unittest.TestCase):
         self.assertIn(response.status_code, (200, 201), response.json)
         return response.json["attempt"]["attempt_id"]
 
+    def test_course_participants_counts_unique_users_and_requires_admin(self):
+        url = '/api/admin/courses/participants'
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.assertEqual(self.client.get(url, headers=self.headers()).status_code, 403)
+        db.session.get(User, 3).role = 'admin'
+        db.session.add(Enrollment(id_user=1, id_course=2))
+        db.session.add(Enrollment(id_user=3, id_course=1))
+        db.session.commit()
+        result = self.client.get(url, headers=self.headers(3))
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json['total_participants'], 2)
+        db.session.query(Enrollment).delete()
+        db.session.commit()
+        self.assertEqual(self.client.get(url, headers=self.headers(3)).json['total_participants'], 0)
+
+    def test_dashboard_learning_counts_and_popularity_use_real_user_enrollments(self):
+        db.session.get(User, 3).role = 'admin'
+        db.session.get(Course, 2).status = 'nonaktif'
+        enrollment = db.session.execute(db.select(Enrollment).where(Enrollment.id_user == 1)).scalar_one()
+        enrollment.status = 'selesai'
+        db.session.add(TestAttempt(id_user=1, id_course=1, test_attempt=1, nilai=80, status='lulus', status_attempt='completed'))
+        db.session.add(Enrollment(id_user=1, id_course=2))
+        db.session.add(Enrollment(id_user=3, id_course=1, status='selesai'))
+        db.session.commit()
+        response = self.client.get('/api/dashboard', headers=self.headers(3))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['learning'], {'total_courses': 2, 'total_enrollments': 3,
+            'completed_enrollments': 1, 'completion_rate': 33.3})
+        self.assertEqual([row['participants'] for row in response.json['popular_courses']], [2, 1])
+        self.assertEqual([row['id'] for row in response.json['popular_courses']], [1, 2])
+
+    def test_leaderboard_best_attempts_completion_privacy_and_pagination(self):
+        db.session.get(User, 3).role = 'admin'
+        enrollment = db.session.execute(db.select(Enrollment).where(Enrollment.id_user == 1)).scalar_one()
+        enrollment.status = 'selesai'
+        enrollment.tanggal_selesai = utcnow()
+        db.session.add_all([
+            TestAttempt(id_user=1, id_course=1, test_attempt=1, nilai=50, status='tidak_lulus', status_attempt='completed'),
+            TestAttempt(id_user=1, id_course=1, test_attempt=2, nilai=80, status='lulus', status_attempt='completed'),
+            TestAttempt(id_user=2, id_course=1, test_attempt=1, nilai=100, status='lulus', status_attempt='completed')])
+        db.session.commit()
+        response = self.client.get('/api/leaderboard?per_page=1', headers=self.headers(2))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['rankings'][0]['user_id'], 1)
+        self.assertEqual(response.json['rankings'][0]['score'], 80)
+        self.assertEqual(response.json['rankings'][0]['completed_courses'], 1)
+        self.assertEqual(response.json['my_rank']['rank'], 2)
+        self.assertNotIn('email', response.json['rankings'][0])
+        self.assertEqual(response.json['pagination']['total'], 2)
+        self.assertEqual(self.client.get('/api/leaderboard?page=2&per_page=1', headers=self.headers()).json['rankings'][0]['user_id'], 2)
+        self.assertEqual(self.client.get('/api/leaderboard?page=0', headers=self.headers()).status_code, 400)
+
+    def test_dashboard_analytics_wib_month_boundary_and_admin_exclusion(self):
+        from services.activity import record_activity
+        from datetime import datetime
+        db.session.get(User, 3).role = 'admin'
+        record_activity(1, 'buka_course', id_course=1, waktu_dimulai=datetime(2026, 1, 31, 18))
+        record_activity(2, 'buka_materi', id_course=1, waktu_dimulai=datetime(2026, 2, 10))
+        record_activity(3, 'buka_course', id_course=1, waktu_dimulai=datetime(2026, 2, 10))
+        db.session.commit()
+        response = self.client.get('/api/dashboard?year=2026', headers=self.headers(3))
+        self.assertEqual(response.status_code, 200)
+        chart = response.json['analytics']
+        self.assertEqual(chart['total'], 2)
+        self.assertEqual(chart['months'][0]['count'], 0)
+        self.assertEqual(chart['months'][1]['percentage'], 100)
+        self.assertEqual(len(response.json['recent_activity']), 3)
+        self.assertEqual(self.client.get('/api/dashboard?year=invalid', headers=self.headers(3)).status_code, 400)
+
     def answers(self, correct=8):
         return [{"question_id": i, "selected_option_id": i * 10 + (1 if i <= correct else 2)} for i in range(1, 11)]
 

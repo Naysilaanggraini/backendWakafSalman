@@ -4,9 +4,18 @@ from sqlalchemy.exc import IntegrityError
 from extensions import db
 from models import Kategori
 from routes.auth import token_required, admin_required
+from services.thumbnail import thumbnail_error
 
 
 kategori_bp = Blueprint("kategori", __name__, url_prefix="/api/kategori")
+
+
+@kategori_bp.get('/public')
+def public_categories():
+    items = db.session.execute(db.select(Kategori).where(Kategori.status == 'aktif')
+                               .order_by(Kategori.id_kategori.asc())).scalars().all()
+    return {'kategori': [{'id': item.id_kategori, 'judul': item.nama_kategori,
+                         'thumbnail': item.thumbnail} for item in items]}, 200
 
 
 def validate_kategori_data(data, *, create=False):
@@ -27,8 +36,10 @@ def validate_kategori_data(data, *, create=False):
                 return None, "nama_kategori wajib diisi"
             if len(value) > 100:
                 return None, "nama_kategori maksimal 100 karakter"
-        if key == "thumbnail" and len(value) > 255:
-            return None, "thumbnail maksimal 255 karakter"
+        if key == 'thumbnail':
+            error = thumbnail_error(value)
+            if error:
+                return None, error
         if key == "status" and value not in {"aktif", "nonaktif"}:
             return None, "Status tidak valid"
         values[key] = value
