@@ -52,6 +52,10 @@ class ProductionConfigTests(unittest.TestCase):
         with app.app_context():
             db.session.execute(db.text("UPDATE alembic_version SET version_num='0003_activity_tracking'"))
             db.session.commit()
+        self.assertEqual(client.get("/health/ready").status_code, 503)
+        with app.app_context():
+            db.session.execute(db.text("UPDATE alembic_version SET version_num='0004_thumbnail_mediumtext'"))
+            db.session.commit()
         self.assertEqual(client.get("/health/ready").status_code, 200)
         with patch.object(db, "session") as session:
             session.execute.side_effect = OperationalError("secret connection info", {}, Exception("password"))
