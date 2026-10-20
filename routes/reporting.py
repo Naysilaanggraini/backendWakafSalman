@@ -7,11 +7,30 @@ from models import User, Activity, Course, Materi, ActivityTracking, UserCourse,
 from models.activity import ACTIVITY_TYPES
 from routes.auth import token_required, admin_required
 from routes.learning_access import install_errors
-from services.dashboard_metrics import rankings, analytics, recent_activity
+from services.dashboard_metrics import rankings, analytics, recent_activity, course_activity_trend
 
 
 reporting_bp = Blueprint("reporting", __name__, url_prefix="/api")
 install_errors(reporting_bp)
+
+
+@reporting_bp.get('/dashboard/analytics')
+@token_required
+@admin_required
+def dashboard_analytics(user):
+    now = datetime.now(timezone.utc) + timedelta(hours=7)
+    period = request.args.get('period', 'daily')
+    kind = request.args.get('kind', 'all')
+    try:
+        year = int(request.args.get('year', now.year))
+        month = int(request.args.get('month', now.month))
+        if not 1904 <= year <= 9998 or not 1 <= month <= 12:
+            raise ValueError()
+    except ValueError:
+        return {'message': 'Tahun atau bulan tidak valid'}, 400
+    if period not in ('daily', 'monthly', 'yearly') or kind not in ('all', 'course_started', 'material_completed', 'course_completed'):
+        return {'message': 'Periode atau jenis aktivitas tidak valid'}, 400
+    return course_activity_trend(period, year, month, kind)
 
 
 @reporting_bp.get('/admin/courses/participants')

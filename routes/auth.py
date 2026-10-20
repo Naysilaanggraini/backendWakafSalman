@@ -276,7 +276,7 @@ def update_me(user):
             return {"message": str(error)}, 400
         except OSError:
             return {"message": "Foto belum dapat disimpan. Coba lagi."}, 503
-        values["foto_profil"] = "/api/auth/profile-photos/" + photo_path.name
+        values["foto_profil"] = getattr(photo_path, 'url', "/api/auth/profile-photos/" + photo_path.name)
     apply_phone(user, values)
     for key, value in values.items():
         setattr(user, key, value)

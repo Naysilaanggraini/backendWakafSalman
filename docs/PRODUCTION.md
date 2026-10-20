@@ -2,10 +2,49 @@
 
 Docker hanya menjalankan API Gunicorn. MariaDB/MySQL disediakan di luar Docker,
 baik terpasang di host yang sama maupun server database terpisah. Nginx di host
-menangani HTTPS. Foto memakai named volume; API dipublikasikan ke
+menangani HTTPS. Upload baru memakai S3-compatible storage; volume foto menyimpan file lokal lama. API dipublikasikan ke
 **127.0.0.1:8000**. Compose tidak membuat, menjalankan, atau menyimpan database.
 
 ## 1. Konfigurasi
+
+Upload PDF materi, foto profil, dan thumbnail menggunakan Cloudflare R2 melalui
+SDK S3 pada backend. Isi `FILE_STORAGE=s3`, `S3_ACCESS_KEY_ID`,
+`S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT_URL`, `S3_BUCKET`, `S3_PUBLIC_URL`,
+`S3_REGION=auto`, dan `S3_KEY_PREFIX=data` di `.env`. Compose meneruskan variabel
+tersebut ke API. Kredensial tidak boleh masuk konfigurasi `VITE_*` atau frontend.
+
+Endpoint Cloudflare R2 selalu menggunakan region `auto`, termasuk jika environment
+lama masih menetapkan region lain. Upload dan baca file menggunakan klien S3 yang sama.
+
+Frontend menampilkan gambar dan membuka PDF hasil upload R2 lewat
+`GET /api/files/storage?url=<URL-publik-asli>`. Backend membaca object melalui S3;
+browser tidak bergantung pada keterjangkauan domain `r2.dev`. URL publik asli
+tetap disimpan ke database. Route hanya menerima Public URL bucket yang
+dikonfigurasi dan key upload aplikasi (UUID, tanggal, folder, ekstensi yang sesuai),
+serta tidak melakukan fetch URL eksternal. File ini tetap bersifat publik sesuai
+konfigurasi upload sebelumnya. Response PDF mendukung Range untuk browser.
+
+Key dibuat sebagai `data/YYYY/MM/materials/<uuid>.pdf`,
+`data/YYYY/MM/profile-photos/<uuid>.png`, atau
+`data/YYYY/MM/thumbnails/<uuid>.png`. Backend menggabungkan
+`S3_PUBLIC_URL.rstrip('/') + '/' + key` dan mengembalikan URL lengkap.
+Form materi/thumbnail menyimpan URL tersebut melalui endpoint create/update
+yang sudah ada; foto profil langsung menyimpan URL ketika update profil.
+Tidak perlu migrasi schema atau pemindahan data lama untuk upload baru.
+
+Bucket harus bisa menerima `PutObject` dan melayani pembacaan lewat Public URL.
+Rollback penyimpanan profil memakai `DeleteObject` hanya untuk objek baru
+yang gagal disimpan ke database. Upload dilakukan server ke server sehingga
+upload browser tidak memerlukan CORS bucket; jika aplikasi lain membaca file
+menggunakan JavaScript lintas origin, atur CORS GET/HEAD pada bucket.
+
+Batas file: PDF 10 MiB, foto profil 2 MiB, thumbnail 512 KiB. Gambar diverifikasi
+dan dikodekan ulang sebagai PNG sebelum upload. Nginx mengizinkan request
+hingga 11 MiB, sementara validasi masing-masing endpoint tetap berlaku.
+File lokal lama tetap tersedia dari route lama; `FILE_STORAGE=local` hanya
+menyediakan kompatibilitas upload lokal PDF/profil. Upload thumbnail baru
+membutuhkan konfigurasi S3. Tidak ada fallback ke disk jika upload S3 gagal;
+API mengembalikan 503 dan tidak mengganti URL database.
 
 Clone release yang akan dipakai. Jalankan semua command dari root repository.
 Pastikan DNS `api.example.com` menuju server, firewall membuka 80/443, dan

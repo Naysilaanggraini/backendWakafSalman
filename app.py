@@ -21,6 +21,7 @@ from routes.reporting import reporting_bp
 from routes.admin_assessment import admin_assessment_bp
 from routes.activity_tracking import tracking_bp
 from routes.logout import logout_bp
+from routes.storage_files import storage_files_bp
 
 def create_app(test_config=None):
     app = Flask(__name__)
@@ -56,6 +57,7 @@ def create_app(test_config=None):
     app.register_blueprint(admin_assessment_bp)
     app.register_blueprint(tracking_bp)
     app.register_blueprint(logout_bp)
+    app.register_blueprint(storage_files_bp)
 
     @app.route("/")
     def home():

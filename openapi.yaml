@@ -37,6 +37,102 @@ tags:
 security:
 - bearerAuth: []
 paths:
+  /api/files/storage:
+    get:
+      tags: [Materi]
+      summary: Baca file upload publik aplikasi melalui S3
+      security: []
+      description: Hanya Public URL bucket terkonfigurasi dengan key upload UUID aplikasi. Mengembalikan PNG atau PDF; URL asli tetap tersimpan di database. Tidak melakukan fetch URL eksternal.
+      parameters:
+      - in: query
+        name: url
+        required: true
+        schema: {type: string, format: uri, maxLength: 500}
+      - in: header
+        name: Range
+        schema: {type: string}
+      responses:
+        '200':
+          description: File dari bucket S3
+          content:
+            image/png:
+              schema: {type: string, format: binary}
+            application/pdf:
+              schema: {type: string, format: binary}
+        '206': {description: Partial content untuk pembaca PDF}
+        '404': {description: URL bukan upload aplikasi atau object tidak ditemukan}
+        '413': {description: Object melebihi batas baca}
+        '503': {description: Object belum dapat dibaca dari S3}
+  /api/course/thumbnail:
+    post:
+      tags: [Course]
+      summary: Upload thumbnail course atau kategori ke S3-compatible storage
+      security:
+      - bearerAuth: []
+      description: Admin aktif. JPG/PNG/WebP maksimal 512 KiB, diverifikasi dan dikodekan ulang menjadi PNG. Simpan URL lengkap response sebagai thumbnail melalui endpoint create/update course atau kategori.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Upload berhasil; URL berupa Public URL + object key, tanpa nama bucket tambahan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  url: {type: string, format: uri}
+        '400': {description: Gambar tidak valid}
+        '401': {description: Belum login}
+        '403': {description: Memerlukan admin aktif}
+        '413': {description: File terlalu besar}
+        '503': {description: Penyimpanan S3 gagal atau konfigurasi belum lengkap}
+  /api/course/{id_course}/materi/pdf:
+    post:
+      tags: [Materi]
+      summary: Upload PDF materi
+      security:
+      - bearerAuth: []
+      description: Admin aktif. PDF maksimal 10 MiB. Upload ke S3 jika FILE_STORAGE=s3; URL lengkap disimpan sebagai tautan_file melalui endpoint create/update materi.
+      parameters:
+      - in: path
+        name: id_course
+        required: true
+        schema: {type: integer, minimum: 1}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+      responses:
+        '201':
+          description: Upload berhasil
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: {type: string}
+                  url: {type: string, format: uri}
+        '400': {description: PDF tidak valid}
+        '401': {description: Belum login}
+        '403': {description: Memerlukan admin aktif}
+        '404': {description: Course tidak ditemukan}
+        '413': {description: File terlalu besar}
+        '503': {description: Penyimpanan gagal}
   /api/auth/logout:
     post:
       tags: [Auth]

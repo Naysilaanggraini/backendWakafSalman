@@ -5,6 +5,7 @@ import warnings
 
 from flask import current_app
 from PIL import Image, ImageOps, UnidentifiedImageError
+from services.object_storage import upload_object, uses_s3
 
 
 MAX_PHOTO_BYTES = 2 * 1024 * 1024
@@ -36,6 +37,8 @@ def save_profile_photo(upload):
                 clean.save(output, format="PNG")
     except (UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
         raise ValueError("File foto tidak valid. Pilih gambar JPG, PNG, atau WebP") from error
+    if uses_s3():
+        return upload_object(output.getvalue(), folder='profile-photos', extension='.png', content_type='image/png')
     directory = photo_directory()
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / (uuid4().hex + ".png")

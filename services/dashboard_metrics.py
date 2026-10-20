@@ -2,6 +2,47 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import case, func, extract, text
 from extensions import db
 from models import User, UserCourse, Course, Activity, TestAttempt
+from calendar import monthrange
+
+
+def course_activity_trend(period, year, month, kind):
+    shifted = func.datetime(Activity.waktu_dimulai, '+7 hours') if db.engine.dialect.name == 'sqlite' else func.timestampadd(text('HOUR'), 7, Activity.waktu_dimulai)
+    local = case((Activity.time_basis == 'UTC', shifted), else_=Activity.waktu_dimulai)
+    filters = (User.role == 'user', Activity.id_course.is_not(None))
+    # First course visit per learner/course, including historical records.
+    starts = db.select(func.min(local).label('at')).join(User, User.id_user == Activity.id_user).where(
+        *filters, Activity.jenis_aktivitas == 'buka_course').group_by(Activity.id_user, Activity.id_course).subquery()
+    sources = []
+    if kind in ('all', 'course_started'):
+        sources.append((starts.c.at, db.select(starts.c.at)))
+    kinds = {'material_completed': 'selesai_materi', 'course_completed': 'selesai_course'}
+    if kind != 'course_started':
+        events = list(kinds.values()) if kind == 'all' else [kinds[kind]]
+        sources.append((local, db.select(local).join(User, User.id_user == Activity.id_user).where(
+            *filters, Activity.jenis_aktivitas.in_(events))))
+    if period == 'daily':
+        keys = [f'{year:04d}-{month:02d}-{day:02d}' for day in range(1, monthrange(year, month)[1] + 1)]
+    elif period == 'monthly':
+        keys = [f'{year:04d}-{m:02d}' for m in range(1, 13)]
+    else:
+        keys = [str(y) for y in range(year - 4, year + 1)]
+    counts = dict.fromkeys(keys, 0)
+    for timestamp, query in sources:
+        parts = [extract('year', timestamp)]
+        if period != 'yearly':
+            parts.append(extract('month', timestamp))
+        if period == 'daily':
+            parts.append(extract('day', timestamp))
+        query = query.with_only_columns(*parts, func.count()).group_by(*parts)
+        query = query.where(parts[0].between(year - 4, year) if period == 'yearly' else parts[0] == year)
+        if period == 'daily':
+            query = query.where(parts[1] == month)
+        for row in db.session.execute(query):
+            key = '-'.join(str(int(value)).zfill(4 if i == 0 else 2) for i, value in enumerate(row[:-1]))
+            if key in counts:
+                counts[key] += row[-1]
+    return {'period': period, 'year': year, 'month': month, 'kind': kind, 'timezone': 'Asia/Jakarta',
+            'points': [{'date': key, 'count': count} for key, count in counts.items()], 'total': sum(counts.values())}
 
 
 def rankings():

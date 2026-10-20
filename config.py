@@ -37,10 +37,20 @@ def load_config():
         "JWT_SECRET_KEY": secret,
         "CORS_ORIGINS": origins,
         "MAX_CONTENT_LENGTH": 3 * 1024 * 1024,
+        "FILE_STORAGE": os.getenv('FILE_STORAGE', 'local'),
+        "S3_ACCESS_KEY_ID": os.getenv('S3_ACCESS_KEY_ID', ''),
+        "S3_SECRET_ACCESS_KEY": os.getenv('S3_SECRET_ACCESS_KEY', ''),
+        "S3_ENDPOINT_URL": os.getenv('S3_ENDPOINT_URL', ''),
+        "S3_BUCKET": os.getenv('S3_BUCKET', ''),
+        "S3_PUBLIC_URL": os.getenv('S3_PUBLIC_URL', ''),
+        "S3_REGION": os.getenv('S3_REGION', 'auto'),
+        "S3_KEY_PREFIX": os.getenv('S3_KEY_PREFIX', 'data'),
         "ENABLE_DEV_ROUTES": not production and os.getenv("ENABLE_DEV_ROUTES", "false").lower() == "true",
         "PROXY_HOPS": int(os.getenv("PROXY_HOPS", "0")),
         "DEBUG": not production and os.getenv("FLASK_DEBUG", "false").lower() in ("1", "true"),
     }
+    if config['FILE_STORAGE'] not in ('local', 's3'):
+        raise ValueError('FILE_STORAGE must be local or s3')
     if os.getenv("PROFILE_PHOTO_DIR"):
         config["PROFILE_PHOTO_DIR"] = str(Path(os.environ["PROFILE_PHOTO_DIR"]).resolve())
     if os.getenv("MATERIAL_PDF_DIR"):

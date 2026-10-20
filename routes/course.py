@@ -7,9 +7,47 @@ from extensions import db
 from models import Course, Kategori, UserCourse, User
 from routes.auth import token_required, admin_required
 from services.thumbnail import thumbnail_error
+from services.object_storage import upload_object, StorageError
+from io import BytesIO
+import warnings
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 
 course_bp = Blueprint("course", __name__, url_prefix="/api/course")
+
+
+@course_bp.post('/thumbnail')
+@token_required
+@admin_required
+def upload_thumbnail(user):
+    limit = 512 * 1024
+    request.max_content_length = limit + 64 * 1024
+    uploaded = request.files.get('file')
+    if uploaded is None or set(request.files) != {'file'} or len(request.files.getlist('file')) != 1:
+        return {'message': 'Kirim satu file thumbnail'}, 400
+    content = uploaded.stream.read(limit + 1)
+    if len(content) > limit:
+        return {'message': 'Ukuran thumbnail maksimal 512 KB'}, 413
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(BytesIO(content)) as source:
+                if source.format not in {'JPEG', 'PNG', 'WEBP'} or source.width * source.height > 16_000_000:
+                    raise ValueError()
+                source.load()
+                image = ImageOps.exif_transpose(source).convert('RGBA')
+                image.thumbnail((1280, 1280))
+                clean = Image.new('RGBA', image.size)
+                clean.paste(image)
+                output = BytesIO()
+                clean.save(output, format='PNG')
+    except (ValueError, UnidentifiedImageError, OSError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+        return {'message': 'Pilih gambar JPG, PNG, atau WebP yang valid'}, 400
+    try:
+        stored = upload_object(output.getvalue(), folder='thumbnails', extension='.png', content_type='image/png')
+    except StorageError:
+        return {'message': 'Thumbnail belum dapat disimpan ke S3. Periksa konfigurasi atau coba lagi.'}, 503
+    return {'message': 'Thumbnail berhasil diupload', 'url': stored.url}, 201
 
 
 def validate_course_data(data, *, create=False):

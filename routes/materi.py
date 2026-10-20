@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from extensions import db
 from models import Course, Materi, Kategori
 from routes.auth import token_required, admin_required
+from services.object_storage import upload_object, uses_s3, StorageError
 
 materi_bp = Blueprint("materi", __name__, url_prefix="/api")
 
@@ -31,6 +32,12 @@ def upload_pdf(user, id_course):
         return {'message': 'Ukuran PDF maksimal 10 MB'}, 413
     if not contents.startswith(b'%PDF-') or b'%%EOF' not in contents[-4096:]:
         return {'message': 'Isi file bukan dokumen PDF yang valid'}, 400
+    if uses_s3():
+        try:
+            stored = upload_object(contents, folder='materials', extension='.pdf', content_type='application/pdf')
+        except StorageError:
+            return {'message': 'PDF belum dapat disimpan ke S3. Periksa konfigurasi atau coba lagi.'}, 503
+        return {'message': 'PDF berhasil diupload', 'url': stored.url}, 201
     filename = f'{uuid4().hex}.pdf'
     link = url_for('materi.download_pdf', filename=filename, _external=True)
     if len(link) > 500:

@@ -131,6 +131,42 @@ class LearningApiTests(unittest.TestCase):
         self.assertEqual(len(response.json['recent_activity']), 3)
         self.assertEqual(self.client.get('/api/dashboard?year=invalid', headers=self.headers(3)).status_code, 400)
 
+    def test_course_trend_periods_filters_refresh_and_authorization(self):
+        from services.activity import record_activity
+        from datetime import datetime
+        db.session.get(User, 3).role = 'admin'
+        for actor, kind, at in [
+            (1, 'buka_course', datetime(2026, 1, 31, 18)),
+            (1, 'buka_course', datetime(2026, 2, 2)),
+            (2, 'buka_course', datetime(2026, 2, 2)),
+            (1, 'selesai_materi', datetime(2026, 2, 2)),
+            (1, 'selesai_course', datetime(2026, 2, 3)),
+            (3, 'selesai_course', datetime(2026, 2, 3)),
+            (2, 'selesai_materi', datetime(2025, 12, 1)),
+        ]:
+            record_activity(actor, kind, id_course=1, waktu_dimulai=at)
+        db.session.commit()
+        url = '/api/dashboard/analytics'
+        self.assertEqual(self.client.get(url).status_code, 401)
+        self.assertEqual(self.client.get(url, headers=self.headers()).status_code, 403)
+        def chart(**params):
+            response = self.client.get(url, query_string={'year': 2026, 'month': 2, **params}, headers=self.headers(3))
+            self.assertEqual(response.status_code, 200, response.json)
+            return response.json
+        daily = chart(period='daily')
+        self.assertEqual(len(daily['points']), 28)
+        self.assertEqual([p['count'] for p in daily['points'][:3]], [1, 2, 1])
+        self.assertEqual(daily['total'], 4)
+        self.assertEqual(chart(period='daily', kind='course_started')['total'], 2)
+        self.assertEqual(chart(period='monthly', kind='material_completed')['points'][1]['count'], 1)
+        self.assertEqual(chart(period='yearly')['points'][-2:], [{'date': '2025', 'count': 1}, {'date': '2026', 'count': 4}])
+        self.assertEqual(chart(period='daily', month=3)['total'], 0)
+        record_activity(2, 'selesai_materi', id_course=1, waktu_dimulai=datetime(2026, 2, 3))
+        db.session.commit()
+        self.assertEqual(chart(period='daily')['total'], 5)
+        for params in ({'period': 'bad'}, {'kind': 'login'}, {'month': 13}, {'year': 'bad'}):
+            self.assertEqual(self.client.get(url, query_string=params, headers=self.headers(3)).status_code, 400)
+
     def answers(self, correct=8):
         return [{"question_id": i, "selected_option_id": i * 10 + (1 if i <= correct else 2)} for i in range(1, 11)]
 
