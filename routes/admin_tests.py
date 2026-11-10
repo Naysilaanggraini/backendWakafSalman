@@ -4,6 +4,7 @@ from extensions import db
 from models import Course, Question, Option
 from routes.auth import token_required, admin_required
 from routes.learning_access import LearningError, install_errors, payload
+from services.deletion import question_used, delete_question
 
 admin_tests_bp = Blueprint("admin_tests", __name__, url_prefix="/api/admin/courses")
 install_errors(admin_tests_bp)
@@ -24,7 +25,7 @@ def question_data(q):
 
 
 def config_data(course):
-    questions = db.session.execute(db.select(Question).where(Question.id_course == course.id_course)
+    questions = db.session.execute(db.select(Question).where(Question.id_course == course.id_course, Question.status == "aktif")
         .order_by(Question.urutan, Question.id_soal)).scalars().all()
     return {"course": course.to_dict(), "passing_grade": course.passing_grade,
             "maksimal_attempt": course.maksimal_attempt, "masa_tunggu_test_hari": course.masa_tunggu_test_hari,
@@ -84,6 +85,18 @@ def validate_question():
 
 
 def write_question(course_id, data, old=None):
+    if old is not None and not question_used(old):
+        occupied = db.session.execute(db.select(Question).where(Question.id_course == course_id,
+            Question.urutan == data['urutan'], Question.id_soal != old.id_soal)).scalar_one_or_none()
+        if occupied:
+            raise LearningError("Urutan soal sudah digunakan", 409)
+        old.pertanyaan, old.urutan, old.status = data['pertanyaan'].strip(), data['urutan'], data['status']
+        for option in list(old.options):
+            db.session.delete(option)
+        db.session.flush()
+        old.options = [Option(teks_pilihan=o['text'].strip(), urutan=o['urutan'], is_benar=o['is_correct']) for o in data['options']]
+        db.session.commit()
+        return {'question': question_data(old)}
     all_questions = db.session.execute(db.select(Question).where(Question.id_course == course_id)).scalars().all()
     occupied = next((q for q in all_questions if q != old and q.urutan == data["urutan"]), None)
     # Inactive historical versions can be moved to an unused order; snapshots keep their original number.
@@ -135,6 +148,11 @@ def update_question(user, course_id, question_id):
 def deactivate_question(user, course_id, question_id):
     course_record(course_id)
     q = existing_question(course_id, question_id)
-    q.status = "nonaktif"
+    if question_used(q):
+        q.status = "nonaktif"
+        message = "Soal dihapus dari daftar; riwayat pengerjaan peserta tetap tersimpan."
+    else:
+        delete_question(q)
+        message = "Soal dan pilihan jawaban berhasil dihapus permanen."
     db.session.commit()
-    return {"question": question_data(q), "message": "Soal dinonaktifkan; attempt lama tetap tersimpan."}
+    return {"message": message}

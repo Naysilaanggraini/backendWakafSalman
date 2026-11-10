@@ -32,10 +32,100 @@ class AdminTestTests(test_learning_api.LearningApiTests):
         changed = self.author("patch", f"/questions/{qid}", self.question_payload())
         self.assertEqual(changed.status_code, 200, changed.json)
         new_id = changed.json["question"]["question_id"]
-        self.assertNotEqual(qid, new_id)
-        self.assertEqual(db.session.get(Question, qid).status, "nonaktif")
+        self.assertEqual(qid, new_id)
+        self.assertEqual(db.session.get(Question, qid).status, "aktif")
         self.assertEqual(self.author("delete", f"/questions/{new_id}").status_code, 200)
-        self.assertIsNotNone(db.session.get(Question, qid))
+        self.assertIsNone(db.session.get(Question, qid))
+
+    def test_delete_used_question_preserves_running_attempt(self):
+        aid = self.start()
+        response = self.author('delete', '/questions/1')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(db.session.get(Question, 1).status, "nonaktif")
+        visible = self.author('get').json['questions']
+        self.assertNotIn(1, [q['question_id'] for q in visible])
+        self.assertEqual(self.submit(aid, correct=8).status_code, 200)
+
+    def test_delete_unused_question_removes_options(self):
+        from models import Option
+        self.assertEqual(self.author('delete', '/questions/1').status_code, 200)
+        self.assertIsNone(db.session.get(Question, 1))
+        self.assertEqual(db.session.query(Option).filter_by(id_soal=1).count(), 0)
+
+    def test_admin_delete_tree_does_not_change_participant_progress(self):
+        from models import Material, MaterialProgress, Course
+        from services.deletion import delete_course_tree, DeleteConflict
+        with self.assertRaises(DeleteConflict):
+            delete_course_tree(db.session.get(Course, 1))
+        db.session.rollback()
+        self.assertIsNotNone(db.session.get(Material, 1))
+        progress = db.session.query(MaterialProgress).filter_by(id_user=1, id_materi=1).one()
+        self.assertEqual(progress.status, 'selesai')
+
+    def test_delete_unused_course_tree(self):
+        from models import Course, Material, Option
+        from services.deletion import delete_course_tree
+        q = Question(id_course=2, pertanyaan='Unused', urutan=1)
+        q.options = [Option(teks_pilihan='Yes', urutan=1, is_benar=True)]
+        db.session.add(q)
+        db.session.commit()
+        qid = q.id_soal
+        delete_course_tree(db.session.get(Course, 2))
+        db.session.commit()
+        self.assertIsNone(db.session.get(Course, 2))
+        self.assertIsNone(db.session.get(Material, 2))
+        self.assertIsNone(db.session.get(Question, qid))
+        self.assertEqual(db.session.query(Option).filter_by(id_soal=qid).count(), 0)
+
+    def test_category_delete_preserves_used_course_and_deletes_unused_course(self):
+        from models import Kategori, Course, Material
+        from routes.kategori import kategori_bp
+        self.app.register_blueprint(kategori_bp)
+        response = self.client.delete('/api/kategori/1', headers=self.headers(3))
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(db.session.get(Kategori, 1).status, 'nonaktif')
+        self.assertEqual(db.session.get(Course, 1).status, 'nonaktif')
+        self.assertIsNotNone(db.session.get(Kategori, 1))
+        self.assertIsNone(db.session.get(Course, 2))
+        self.assertIsNone(db.session.get(Material, 2))
+        self.assertNotIn(1, [item['id_kategori'] for item in self.client.get('/api/kategori', headers=self.headers(3)).json['kategori']])
+
+    def test_delete_used_course_hides_it_without_deleting_participant_history(self):
+        from models import Course, Material, Enrollment, MaterialProgress, UserAnswer
+        from routes.course import course_bp
+        self.app.register_blueprint(course_bp)
+        aid = self.start()
+        self.assertEqual(self.submit(aid, correct=8).status_code, 200)
+        snapshot = db.session.get(TestAttempt, aid).question_snapshot
+        answer_count = db.session.query(UserAnswer).filter_by(id_penilaian=aid).count()
+        response = self.client.delete('/api/course/1', headers=self.headers(3))
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(db.session.get(Course, 1).status, 'nonaktif')
+        self.assertIsNotNone(db.session.get(Material, 1))
+        self.assertEqual(db.session.query(Enrollment).filter_by(id_course=1).count(), 2)
+        self.assertEqual(db.session.query(MaterialProgress).filter_by(id_materi=1).count(), 2)
+        self.assertEqual(db.session.get(TestAttempt, aid).question_snapshot, snapshot)
+        self.assertEqual(db.session.query(UserAnswer).filter_by(id_penilaian=aid).count(), answer_count)
+        visible = self.client.get('/api/course', headers=self.headers(3)).json['course']
+        self.assertNotIn(1, [item['id_course'] for item in visible])
+        self.assertEqual(self.client.delete('/api/course/1', headers=self.headers(3)).status_code, 200)
+
+    def test_category_delete_removes_unused_descendants(self):
+        from models import Kategori, Course, Material
+        from routes.kategori import kategori_bp
+        self.app.register_blueprint(kategori_bp)
+        category = Kategori(nama_kategori='Unused')
+        db.session.add(category)
+        db.session.flush()
+        cid = category.id_kategori
+        course = db.session.get(Course, 2)
+        course.id_kategori = cid
+        db.session.commit()
+        response = self.client.delete(f'/api/kategori/{cid}', headers=self.headers(3))
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertIsNone(db.session.get(Kategori, cid))
+        self.assertIsNone(db.session.get(Course, 2))
+        self.assertIsNone(db.session.get(Material, 2))
 
     def test_admin_denies_learner_and_invalid_payloads(self):
         for method, suffix in (("get", ""), ("patch", ""), ("post", "/questions"), ("patch", "/questions/1"), ("delete", "/questions/1")):

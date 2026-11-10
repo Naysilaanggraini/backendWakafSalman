@@ -37,20 +37,24 @@ class CourseApiTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def get_record(self, model, ident):
+    def get_record(self, model, ident, **kwargs):
         records, key = {User: (self.users, "id_user"), Kategori: (self.categories, "id_kategori"),
                         Course: (self.items, "id_course")}[model]
         return next((item for item in records if getattr(item, key) == ident), None)
 
     def execute_query(self, query):
         sql = str(query)
+        if "FOR UPDATE" in sql:
+            result = MagicMock()
+            result.scalars.return_value.all.return_value = []
+            return result
         restricted = "course.status =" in sql
-        if restricted:
+        if "EXISTS" in sql:
             self.assertIn("kategori.status =", sql)
             self.assertIn("EXISTS", sql)
         result = MagicMock()
         result.scalars.return_value.all.return_value = [item for item in self.items if not restricted or
-            (item.status == "aktif" and item.kategori.status == "aktif")]
+            (item.status == "aktif" and ("EXISTS" not in sql or item.kategori.status == "aktif"))]
         return result
 
     def add_record(self, item):
@@ -84,7 +88,7 @@ class CourseApiTests(unittest.TestCase):
     def test_list_course_visibility_and_empty_list(self):
         response = self.client.get("/api/course", headers=self.headers())
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json["course"]), 3)
+        self.assertEqual(len(response.json["course"]), 2)
         response = self.client.get("/api/course", headers=self.headers(2))
         self.assertEqual([item["id_course"] for item in response.json["course"]], [1])
         self.items.clear()
@@ -169,7 +173,7 @@ class CourseApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.session.delete.assert_called_once_with(self.items[0])
         self.session.commit.assert_called_once()
-        self.session.execute.assert_not_called()
+        self.session.execute.assert_called()
 
     def test_foreign_key_conflicts_rollback(self):
         for method, path, payload, code in [("post", "/api/course", {"judul_course": "Baru", "id_kategori": 1}, 1452),
@@ -182,8 +186,9 @@ class CourseApiTests(unittest.TestCase):
 
     def test_unexpected_integrity_error_is_not_fk_conflict(self):
         self.session.commit.side_effect = IntegrityError("write", {}, Exception(1048, "Unexpected null"))
-        with self.assertRaises(IntegrityError):
-            self.client.post("/api/course", headers=self.headers(), json={"judul_course": "Baru", "id_kategori": 1})
+        response = self.client.post("/api/course", headers=self.headers(), json={"judul_course": "Baru", "id_kategori": 1})
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn('Unexpected null', response.get_data(as_text=True))
         self.session.rollback.assert_called_once()
 
     def test_model_matches_schema_without_delete_cascade(self):

@@ -33,13 +33,16 @@ class KategoriApiTests(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def get_record(self, model, ident):
+    def get_record(self, model, ident, **kwargs):
         records = [self.admin, self.user, self.inactive] if model is User else self.items
         key = "id_user" if model is User else "id_kategori"
         return next((item for item in records if getattr(item, key) == ident), None)
 
     def execute_query(self, query):
         result = MagicMock()
+        if "FOR UPDATE" in str(query):
+            result.scalars.return_value.all.return_value = []
+            return result
         active_only = "kategori.status =" in str(query)
         result.scalars.return_value.all.return_value = [
             item for item in self.items if not active_only or item.status == "aktif"
@@ -85,7 +88,7 @@ class KategoriApiTests(unittest.TestCase):
     def test_list_and_detail_visibility_and_serialization(self):
         response = self.client.get("/api/kategori", headers=self.headers())
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json["kategori"]), 2)
+        self.assertEqual(len(response.json["kategori"]), 1)
         response = self.client.get("/api/kategori", headers=self.headers(2))
         self.assertEqual(len(response.json["kategori"]), 1)
         response = self.client.get("/api/kategori/1", headers=self.headers(2))
@@ -162,8 +165,9 @@ class KategoriApiTests(unittest.TestCase):
 
     def test_unexpected_integrity_error_is_not_reported_as_duplicate(self):
         self.session.commit.side_effect = IntegrityError("insert", {}, Exception(1048, "Unexpected null"))
-        with self.assertRaises(IntegrityError):
-            self.client.post("/api/kategori", headers=self.headers(), json={"nama_kategori": "Baru"})
+        response = self.client.post("/api/kategori", headers=self.headers(), json={"nama_kategori": "Baru"})
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn('Unexpected null', response.get_data(as_text=True))
         self.session.rollback.assert_called_once()
 
     def test_model_matches_schema(self):

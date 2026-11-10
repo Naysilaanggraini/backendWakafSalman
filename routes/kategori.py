@@ -55,15 +55,14 @@ def integrity_response(error):
         return {"message": "Nama kategori sudah terdaftar"}, 409
     if code in {1451, 1452}:
         return {"message": "Kategori masih digunakan atau memiliki relasi tidak valid"}, 409
-    raise error
+    return {"message": "Kategori memiliki konflik data. Muat ulang dan coba lagi."}, 409
 
 
 @kategori_bp.route("", methods=["GET"])
 @token_required
 def list_kategori(user):
     query = db.select(Kategori).order_by(Kategori.id_kategori.desc())
-    if user.role != "admin":
-        query = query.where(Kategori.status == "aktif")
+    query = query.where(Kategori.status == "aktif")
     items = db.session.execute(query).scalars().all()
     return {"kategori": [item.to_dict() for item in items]}, 200
 
@@ -124,13 +123,26 @@ def update_kategori(user, kategori_id):
 @token_required
 @admin_required
 def delete_kategori(user, kategori_id):
-    item = db.session.get(Kategori, kategori_id)
+    from models import Course
+    from services.deletion import rows, remove_course, DeleteConflict
+    item = db.session.get(Kategori, kategori_id, with_for_update=True)
     if item is None:
         return {"message": "Kategori tidak ditemukan"}, 404
-    db.session.delete(item)
     try:
+        courses = rows(Course, Course.id_kategori == kategori_id)
+        preserved = False
+        for course in courses:
+            preserved = remove_course(course) or preserved
+        if preserved:
+            item.status = 'nonaktif'
+        else:
+            db.session.delete(item)
         db.session.commit()
+    except DeleteConflict as error:
+        db.session.rollback()
+        return {"message": str(error)}, 409
     except IntegrityError as error:
         return integrity_response(error)
-    return {"message": "Kategori berhasil dihapus"}, 200
+    message = "Kategori dan course dihapus dari daftar; riwayat peserta tetap tersimpan." if preserved else "Kategori beserta isinya berhasil dihapus permanen."
+    return {"message": message}, 200
 
