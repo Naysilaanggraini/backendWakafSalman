@@ -1,5 +1,32 @@
 # Deployment production Lentera
 
+## Deployment server lentera.wakafsalman.or.id
+
+API berjalan di Docker pada `127.0.0.1:8841` (`API_PORT=8841`), frontend
+di `127.0.0.1:8840`. URL API browser adalah
+`https://lentera.wakafsalman.or.id/api`. Nginx aaPanel meneruskan prefix
+`/api` tanpa rewrite, dan mengarahkan HTTP ke HTTPS. Konfigurasi aktif:
+`/www/server/panel/vhost/nginx/extension/lentera.wakafsalman.or.id/reverse-proxy.conf`.
+
+Database eksternal memakai kredensial `.env`, dengan
+`DB_HOST=host.docker.internal`. Jaringan Compose dipatok ke `172.24.0.0/16`
+sesuai grant akun MySQL khusus subnet tersebut; jika subnet diubah, sesuaikan
+grant MySQL. `PROXY_HOPS=1` sesuai proxy Nginx yang menimpa forwarding headers.
+
+```sh
+docker compose build
+docker compose run --rm --no-deps -T api flask --app app db upgrade
+docker compose up -d --wait
+docker compose exec -T api flask --app app db current
+curl --fail http://127.0.0.1:8841/health/ready
+curl --fail https://lentera.wakafsalman.or.id/api/course/public
+```
+
+Database baru tidak berisi akun admin maupun course. Buat admin dengan
+perintah interaktif `create-admin` pada bagian 3 saat dibutuhkan.
+Panduan umum berikut memakai port dan domain contoh; gunakan konfigurasi
+deployment server di atas untuk instalasi ini.
+
 Docker hanya menjalankan API Gunicorn. MariaDB/MySQL disediakan di luar Docker,
 baik terpasang di host yang sama maupun server database terpisah. Nginx di host
 menangani HTTPS. Upload baru memakai S3-compatible storage; volume foto menyimpan file lokal lama. API dipublikasikan ke

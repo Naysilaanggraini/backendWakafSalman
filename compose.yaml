@@ -51,3 +51,10 @@ services:
 
 volumes:
   profile_photos:
+
+# MySQL grants access to the application account from this subnet only.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.24.0.0/16
